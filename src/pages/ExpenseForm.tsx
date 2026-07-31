@@ -179,7 +179,7 @@ export default function ExpenseForm() {
       setExchangeRate(rate.toString());
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to fetch rate';
-      setRateError('⚠️ Offline or rate fetch failed. Set rate manually.');
+      setRateError(!navigator.onLine ? '⚠️ Offline — enter rate manually' : '⚠️ Rate fetch failed. Set rate manually.');
       console.warn('Exchange rate fetch warning:', msg);
     } finally {
       setIsFetchingRate(false);
