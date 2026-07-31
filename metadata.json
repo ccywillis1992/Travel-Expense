@@ -1,0 +1,6 @@
+{
+  "name": "Travel Expense Tracker",
+  "description": "A mobile-first web app to log travel expenses in under 5 seconds per entry with live budget tracking.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
