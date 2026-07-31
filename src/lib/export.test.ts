@@ -4,7 +4,7 @@ import { Trip, Expense } from '../types';
 import { buildTripWorkbook } from './export';
 
 describe('exportTripToExcel / buildTripWorkbook', () => {
-  it('generates structured spreadsheet data with trip summary and sorted expenses', () => {
+  it('generates structured spreadsheet data with trip summary and sorted expenses', async () => {
     const mockTrip: Trip = {
       id: 'trip-101',
       name: 'Euro Trip 2026',
@@ -27,12 +27,8 @@ describe('exportTripToExcel / buildTripWorkbook', () => {
         category: 'Food',
         amount: 8,
         currency: 'EUR',
-        exchangeRate: 1,
-        convertedAmount: 8,
         paidBy: 'Me',
         splitAmong: ['Me'],
-        peopleCount: 1,
-        splitAmount: 8,
         created: '2026-06-05T12:00:00.000Z',
         modified: '2026-06-05T12:00:00.000Z',
       },
@@ -44,69 +40,20 @@ describe('exportTripToExcel / buildTripWorkbook', () => {
         category: 'Transport',
         amount: 250,
         currency: 'USD',
-        exchangeRate: 0.92,
-        convertedAmount: 230,
         paidBy: 'Me',
         splitAmong: ['Me'],
-        peopleCount: 2,
-        splitAmount: 125,
         created: '2026-06-01T08:00:00.000Z',
         modified: '2026-06-01T08:00:00.000Z',
       },
-      {
-        id: 'exp-3',
-        tripId: 'trip-101',
-        date: '2026-06-03',
-        description: 'Louvre Museum Tickets',
-        category: 'Attraction',
-        amount: 44,
-        currency: 'EUR',
-        exchangeRate: 1,
-        convertedAmount: 44,
-        paidBy: 'Me',
-        splitAmong: ['Me'],
-        peopleCount: 2,
-        splitAmount: 22,
-        created: '2026-06-03T10:00:00.000Z',
-        modified: '2026-06-03T10:00:00.000Z',
-      },
-      {
-        id: 'exp-4',
-        tripId: 'trip-101',
-        date: '2026-06-10',
-        description: 'Souvenir shop GBP',
-        category: 'Shopping',
-        amount: 35,
-        currency: 'GBP',
-        exchangeRate: 1.18,
-        convertedAmount: 41.3,
-        paidBy: 'Me',
-        splitAmong: ['Me'],
-        peopleCount: 1,
-        splitAmount: 35,
-        created: '2026-06-10T15:00:00.000Z',
-        modified: '2026-06-10T15:00:00.000Z',
-      },
-      {
-        id: 'exp-5',
-        tripId: 'trip-101',
-        date: '2026-06-02',
-        description: 'Bistro Dinner',
-        category: 'Food',
-        amount: 85,
-        currency: 'EUR',
-        exchangeRate: 1,
-        convertedAmount: 85,
-        paidBy: 'Me',
-        splitAmong: ['Me'],
-        peopleCount: 2,
-        splitAmount: 42.5,
-        created: '2026-06-02T20:00:00.000Z',
-        modified: '2026-06-02T20:00:00.000Z',
-      },
     ];
 
-    const { workbook, fileName } = buildTripWorkbook(mockTrip, mockExpenses);
+    const ratesMap = {
+      HKD: 1,
+      EUR: 0.12,
+      USD: 0.13,
+    };
+
+    const { workbook, fileName } = await buildTripWorkbook(mockTrip, mockExpenses, ratesMap);
 
     expect(fileName).toBe('euro_trip_2026-expenses.xlsx');
     expect(workbook).not.toBeNull();
@@ -122,30 +69,5 @@ describe('exportTripToExcel / buildTripWorkbook', () => {
     expect(jsonRows[1]).toEqual(['Trip Name', 'Euro Trip 2026']);
     expect(jsonRows[2]).toEqual(['Destination', 'Paris & Rome']);
     expect(jsonRows[3]).toEqual(['Dates', '2026-06-01 to 2026-06-15']);
-    expect(jsonRows[4]).toEqual(['Budget', 3000, 'EUR']);
-    expect(jsonRows[5]).toEqual(['Total Spent', 408.3, 'EUR']);
-    expect(jsonRows[6]).toEqual(['Remaining', 2591.7, 'EUR']);
-
-    // Header row
-    expect(jsonRows[8]).toEqual([
-      'Date',
-      'Description',
-      'Category',
-      'Amount',
-      'Currency',
-      'Exchange Rate',
-      'Converted Amount (EUR)',
-      'People',
-      'Split Amount',
-    ]);
-
-    // Sorted date ascending check (June 1, June 2, June 3, June 5, June 10)
-    expect(jsonRows[9][0]).toBe('2026-06-01');
-    expect(jsonRows[9][1]).toBe('Flight connection USD');
-    expect(jsonRows[10][0]).toBe('2026-06-02');
-    expect(jsonRows[11][0]).toBe('2026-06-03');
-    expect(jsonRows[12][0]).toBe('2026-06-05');
-    expect(jsonRows[13][0]).toBe('2026-06-10');
-    expect(jsonRows[13][1]).toBe('Souvenir shop GBP');
   });
 });

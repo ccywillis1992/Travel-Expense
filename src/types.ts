@@ -28,15 +28,15 @@ export type Expense = {
   date: string;             // ISO date
   description: string;
   category: ExpenseCategory;
-  amount: number;            // in original currency
+  amount: number;            // in original currency typed by user
   currency: string;          // ISO currency code of original amount
-  exchangeRate: number;      // 1 currency = X Settings.baseCurrency
-  convertedAmount: number;   // amount * exchangeRate, in Settings.baseCurrency
   paidBy: string;            // participant who paid
   splitAmong: string[];      // participants split among
   created: string;
   modified: string;
-  // Legacy field support for migration
+  // Legacy field support for migration / backwards compatibility
+  exchangeRate?: number;
+  convertedAmount?: number;
   peopleCount?: number;
   splitAmount?: number;
 };

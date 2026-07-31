@@ -10,7 +10,7 @@ import {
   saveDraftExpense,
   clearDraftExpense,
 } from '../lib/storage';
-import { SUPPORTED_CURRENCIES, CATEGORIES, fetchExchangeRate } from '../lib/currency';
+import { SUPPORTED_CURRENCIES, CATEGORIES } from '../lib/currency';
 import { personSplitAmount } from '../lib/calculations';
 import { getSettings } from '../lib/settings';
 
@@ -46,11 +46,6 @@ export default function ExpenseForm() {
   const [date, setDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
   const [paidBy, setPaidBy] = useState<string>('Me');
   const [splitAmong, setSplitAmong] = useState<string[]>(['Me']);
-  const [exchangeRate, setExchangeRate] = useState<string>('1');
-
-  // Async & UI states
-  const [isFetchingRate, setIsFetchingRate] = useState<boolean>(false);
-  const [rateError, setRateError] = useState<string | null>(null);
 
   // Draft Banner State
   const [draftBannerVisible, setDraftBannerVisible] = useState<boolean>(false);
@@ -97,7 +92,6 @@ export default function ExpenseForm() {
             ? foundExpense.splitAmong
             : tripParticipants
         );
-        setExchangeRate(foundExpense.exchangeRate ? foundExpense.exchangeRate.toString() : '1');
       }
     } else {
       // New mode
@@ -105,7 +99,6 @@ export default function ExpenseForm() {
       setCurrency(defaultCurr);
       setPaidBy(tripParticipants[0] || 'Me');
       setSplitAmong([...tripParticipants]);
-      setExchangeRate(defaultCurr === baseCurrency ? '1' : '1');
 
       if (duplicateFromId) {
         const allExpenses = getExpenses();
@@ -122,7 +115,6 @@ export default function ExpenseForm() {
               ? foundExpense.splitAmong
               : tripParticipants
           );
-          setExchangeRate(foundExpense.exchangeRate ? foundExpense.exchangeRate.toString() : '1');
         }
       } else {
         // Check for saved draft
@@ -149,7 +141,6 @@ export default function ExpenseForm() {
 
     const handler = setTimeout(() => {
       const numAmount = Number(amount);
-      const numRate = Number(exchangeRate) || 1;
 
       saveDraftExpense({
         tripId,
@@ -160,12 +151,11 @@ export default function ExpenseForm() {
         date,
         paidBy,
         splitAmong,
-        exchangeRate: numRate,
       });
     }, 400);
 
     return () => clearTimeout(handler);
-  }, [amount, currency, category, description, date, paidBy, splitAmong, exchangeRate, isEditMode, tripId, draftBannerVisible]);
+  }, [amount, currency, category, description, date, paidBy, splitAmong, isEditMode, tripId, draftBannerVisible]);
 
   // Restore draft
   const handleRestoreDraft = () => {
@@ -177,7 +167,6 @@ export default function ExpenseForm() {
     if (draftData.date) setDate(draftData.date);
     if (draftData.paidBy) setPaidBy(draftData.paidBy);
     if (draftData.splitAmong) setSplitAmong(draftData.splitAmong);
-    if (draftData.exchangeRate !== undefined) setExchangeRate(draftData.exchangeRate.toString());
     setDraftBannerVisible(false);
   };
 
@@ -186,44 +175,6 @@ export default function ExpenseForm() {
     clearDraftExpense();
     setDraftBannerVisible(false);
     setDraftData(null);
-  };
-
-  // 3. Currency Rate Fetching
-  const handleCurrencyChange = async (newCurrency: string) => {
-    setCurrency(newCurrency);
-    setRateError(null);
-
-    if (newCurrency === baseCurrency) {
-      setExchangeRate('1');
-    } else {
-      await updateExchangeRate(newCurrency, baseCurrency);
-    }
-  };
-
-  const updateExchangeRate = async (fromCurr: string, toCurr: string) => {
-    if (fromCurr === toCurr) {
-      setExchangeRate('1');
-      setRateError(null);
-      return;
-    }
-
-    setIsFetchingRate(true);
-    setRateError(null);
-
-    try {
-      const rate = await fetchExchangeRate(fromCurr, toCurr);
-      setExchangeRate(rate.toString());
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Failed to fetch rate';
-      setRateError(!navigator.onLine ? 'Offline — enter rate manually' : 'Rate fetch failed. Set rate manually.');
-      console.warn('Exchange rate fetch warning:', msg);
-    } finally {
-      setIsFetchingRate(false);
-    }
-  };
-
-  const handleManualRefreshRate = () => {
-    updateExchangeRate(currency, baseCurrency);
   };
 
   const toggleSplitParticipant = (person: string) => {
@@ -241,8 +192,6 @@ export default function ExpenseForm() {
 
   // Calculations
   const numAmount = Number(amount) || 0;
-  const numRate = Number(exchangeRate) || 1;
-  const convertedAmount = numAmount * numRate;
   const currentSplitAmount = personSplitAmount(numAmount, splitAmong.length);
 
   // Validation
@@ -269,8 +218,6 @@ export default function ExpenseForm() {
     if (!validate() || !trip) return;
 
     const finalAmount = Number(amount);
-    const finalRate = currency === baseCurrency ? 1 : Number(exchangeRate) || 1;
-    const finalConverted = finalAmount * finalRate;
 
     if (isEditMode && existingExpense) {
       updateExpense({
@@ -282,8 +229,6 @@ export default function ExpenseForm() {
         date,
         paidBy,
         splitAmong,
-        exchangeRate: finalRate,
-        convertedAmount: finalConverted,
       });
     } else {
       createExpense({
@@ -295,8 +240,6 @@ export default function ExpenseForm() {
         date,
         paidBy,
         splitAmong,
-        exchangeRate: finalRate,
-        convertedAmount: finalConverted,
       });
       clearDraftExpense();
     }
@@ -330,7 +273,6 @@ export default function ExpenseForm() {
     );
   }
 
-  const isDifferentCurrency = currency !== baseCurrency;
   const tripParticipants = trip.participants && trip.participants.length > 0 ? trip.participants : ['Me'];
 
   return (
@@ -420,7 +362,7 @@ export default function ExpenseForm() {
           <select
             id="expense-currency"
             value={currency}
-            onChange={(e) => handleCurrencyChange(e.target.value)}
+            onChange={(e) => setCurrency(e.target.value)}
             className="w-full min-h-[44px] px-3 py-2 border border-gray-300 rounded-xl text-base bg-white font-semibold text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-500"
           >
             {SUPPORTED_CURRENCIES.map((curr) => (
@@ -552,62 +494,6 @@ export default function ExpenseForm() {
             </span>
           </div>
         </div>
-
-        {/* 7. Exchange Rate Row (Only visible if currency != baseCurrency) */}
-        {isDifferentCurrency && (
-          <div className="bg-amber-50/70 border border-amber-200 p-3.5 rounded-2xl space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-amber-900 uppercase tracking-wider">
-                Exchange Rate (1 {currency} = ? {baseCurrency})
-              </span>
-              <button
-                id="btn-refresh-exchange-rate"
-                type="button"
-                onClick={handleManualRefreshRate}
-                disabled={isFetchingRate}
-                className="px-2.5 py-1 bg-white border border-amber-300 text-amber-900 rounded-lg text-xs font-semibold shadow-2xs hover:bg-amber-100 flex items-center gap-1 active:scale-95 transition disabled:opacity-50"
-              >
-                🔄 {isFetchingRate ? 'Fetching...' : 'Refresh Rate'}
-              </button>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label htmlFor="expense-exchange-rate" className="block text-[11px] font-semibold text-amber-800 mb-0.5">
-                  Rate
-                </label>
-                <input
-                  id="expense-exchange-rate"
-                  type="number"
-                  step="any"
-                  value={exchangeRate}
-                  onChange={(e) => setExchangeRate(e.target.value)}
-                  className="w-full min-h-[40px] px-3 py-1.5 bg-white border border-amber-300 rounded-xl text-sm font-semibold text-gray-900 focus:outline-none focus:ring-2 focus:ring-amber-200"
-                />
-              </div>
-
-              <div>
-                <div className="text-[11px] font-semibold text-amber-800 mb-0.5">
-                  Converted Total ({baseCurrency})
-                </div>
-                <div className="min-h-[40px] px-3 py-1.5 bg-amber-100/60 border border-amber-300 rounded-xl text-sm font-extrabold text-amber-950 flex items-center">
-                  {convertedAmount.toLocaleString(undefined, {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
-                  })}
-                </div>
-              </div>
-            </div>
-
-            <p className="text-[11px] text-amber-800 italic">
-              converted to {baseCurrency}
-            </p>
-
-            {rateError && (
-              <p className="text-xs text-red-600 font-medium">{rateError}</p>
-            )}
-          </div>
-        )}
 
         {/* Action Buttons */}
         <div className="pt-2 flex items-center gap-3">

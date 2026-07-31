@@ -2,7 +2,7 @@ import { getTrips, saveTrips, getExpenses, saveExpenses } from './storage';
 import { Trip, Expense } from '../types';
 
 const SCHEMA_VERSION_KEY = 'schemaVersion';
-const CURRENT_SCHEMA_VERSION = '2';
+const CURRENT_SCHEMA_VERSION = '3';
 
 export function runMigrationsIfNeeded(): void {
   try {
@@ -47,6 +47,14 @@ export function runMigrationsIfNeeded(): void {
       }
       if (!e.splitAmong || !Array.isArray(e.splitAmong) || e.splitAmong.length === 0) {
         e.splitAmong = [...tripParticipants];
+        expensesChanged = true;
+      }
+      if ('exchangeRate' in e) {
+        delete e.exchangeRate;
+        expensesChanged = true;
+      }
+      if ('convertedAmount' in e) {
+        delete e.convertedAmount;
         expensesChanged = true;
       }
       return e;

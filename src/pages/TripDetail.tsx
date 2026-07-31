@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Trip, Expense } from '../types';
 import { getTrips, getExpensesForTrip, deleteTrip, deleteExpense } from '../lib/storage';
-import { tripSpent, tripRemaining, personSplitAmount } from '../lib/calculations';
-import { CATEGORIES } from '../lib/currency';
+import { calculateTripSpent, personSplitAmount } from '../lib/calculations';
+import { CATEGORIES, resolveRatesForTrip, ResolvedCurrencyRate } from '../lib/currency';
 import { exportTripToExcel } from '../lib/export';
 import { getSettings } from '../lib/settings';
 import ConfirmModal from '../components/ConfirmModal';
@@ -15,6 +15,8 @@ export default function TripDetail() {
 
   const [trip, setTrip] = useState<Trip | null>(null);
   const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [ratesInfo, setRatesInfo] = useState<Record<string, ResolvedCurrencyRate>>({});
+  const [isFetchingRates, setIsFetchingRates] = useState<boolean>(false);
 
   // Filter & Sort state
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
@@ -31,20 +33,51 @@ export default function TripDetail() {
     message: string;
   } | null>(null);
 
-  useEffect(() => {
-    if (tripId) {
-      loadData(tripId);
-    }
-  }, [tripId]);
-
-  const loadData = (id: string) => {
+  const loadDataAndRates = useCallback(async (id: string) => {
     const allTrips = getTrips();
     const foundTrip = allTrips.find((t) => t.id === id);
     if (foundTrip) {
       setTrip(foundTrip);
-      setExpenses(getExpensesForTrip(id));
+      const tripExpenses = getExpensesForTrip(id);
+      setExpenses(tripExpenses);
+
+      // Collect distinct currencies
+      const defaultCurr = foundTrip.defaultCurrency || foundTrip.summaryCurrency || 'HKD';
+      const currencies = Array.from(new Set([defaultCurr, baseCurrency, ...tripExpenses.map((e) => e.currency)]));
+      
+      setIsFetchingRates(true);
+      try {
+        const info = await resolveRatesForTrip(baseCurrency, currencies);
+        setRatesInfo(info);
+      } catch (err) {
+        console.warn('Failed to resolve rates:', err);
+      } finally {
+        setIsFetchingRates(false);
+      }
     } else {
       setTrip(null);
+    }
+  }, [baseCurrency]);
+
+  useEffect(() => {
+    if (tripId) {
+      loadDataAndRates(tripId);
+    }
+  }, [tripId, loadDataAndRates]);
+
+  const handleRefreshRates = async () => {
+    if (!trip) return;
+    const defaultCurr = trip.defaultCurrency || trip.summaryCurrency || 'HKD';
+    const currencies = Array.from(new Set([defaultCurr, baseCurrency, ...expenses.map((e) => e.currency)]));
+    
+    setIsFetchingRates(true);
+    try {
+      const info = await resolveRatesForTrip(baseCurrency, currencies);
+      setRatesInfo(info);
+    } catch (err) {
+      console.warn('Failed to refresh rates:', err);
+    } finally {
+      setIsFetchingRates(false);
     }
   };
 
@@ -80,7 +113,8 @@ export default function TripDetail() {
       deleteExpense(confirmModalState.id);
       setConfirmModalState(null);
       if (tripId) {
-        setExpenses(getExpensesForTrip(tripId));
+        const updated = getExpensesForTrip(tripId);
+        setExpenses(updated);
       }
     }
   };
@@ -91,8 +125,8 @@ export default function TripDetail() {
     }
   };
 
-  const formatCurrency = (val: number, currency: string) => {
-    return `${currency} ${val.toLocaleString(undefined, {
+  const formatCurrency = (val: number, currencyCode: string) => {
+    return `${currencyCode} ${val.toLocaleString(undefined, {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     })}`;
@@ -113,19 +147,37 @@ export default function TripDetail() {
     );
   }
 
-  const spent = tripSpent(trip, expenses);
-  const remaining = tripRemaining(trip, expenses);
+  // Construct simple rate map (currency -> number | null)
+  const ratesMap: Record<string, number | null> = {};
+  (Object.entries(ratesInfo) as [string, ResolvedCurrencyRate][]).forEach(([curr, info]) => {
+    ratesMap[curr] = info.rate;
+  });
+
+  const defaultCurrency = trip.defaultCurrency || trip.summaryCurrency || 'HKD';
+  const spentSummary = calculateTripSpent(trip, expenses, ratesMap, baseCurrency);
   const hasBudget = trip.budget !== null && trip.budget !== undefined;
+  const remaining = hasBudget ? trip.budget! - spentSummary.baseSpent : null;
   const isOverBudget = hasBudget && remaining! < 0;
 
   // Filter expenses
   const filteredExpenses = expenses.filter((e) => {
     const matchesCategory = selectedCategory === 'ALL' || e.category === selectedCategory;
-    const matchesQuery = searchQuery.trim() === '' ||
+    const matchesQuery =
+      searchQuery.trim() === '' ||
       e.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
       e.category.toLowerCase().includes(searchQuery.toLowerCase());
     return matchesCategory && matchesQuery;
   });
+
+  // Helper function to calculate converted amount for a single expense
+  const getExpenseConvertedAmount = (exp: Expense): number | null => {
+    if (exp.currency === baseCurrency) return exp.amount;
+    const rate = ratesMap[exp.currency];
+    if (typeof rate === 'number' && !isNaN(rate)) {
+      return exp.amount * rate;
+    }
+    return null;
+  };
 
   // Sort expenses
   const sortedExpenses = [...filteredExpenses].sort((a, b) => {
@@ -134,8 +186,8 @@ export default function TripDetail() {
       const dateB = new Date(b.date).getTime();
       return sortOrder === 'desc' ? dateB - dateA : dateA - dateB;
     } else {
-      const amountA = a.convertedAmount;
-      const amountB = b.convertedAmount;
+      const amountA = getExpenseConvertedAmount(a) ?? a.amount;
+      const amountB = getExpenseConvertedAmount(b) ?? b.amount;
       return sortOrder === 'desc' ? amountB - amountA : amountA - amountB;
     }
   });
@@ -156,6 +208,15 @@ export default function TripDetail() {
         </button>
 
         <div className="flex items-center gap-2">
+          <button
+            id="btn-refresh-rates"
+            onClick={handleRefreshRates}
+            disabled={isFetchingRates}
+            className="min-h-[44px] px-3 py-2 text-xs font-semibold text-gray-700 bg-white border border-gray-200 rounded-xl shadow-xs active:scale-95 transition flex items-center gap-1 hover:bg-gray-50 disabled:opacity-50"
+            title="Refresh Exchange Rates"
+          >
+            🔄 {isFetchingRates ? 'Refreshing...' : 'Refresh Rates'}
+          </button>
           <button
             id="btn-edit-trip"
             onClick={() => navigate(`/trip/${trip.id}/edit`)}
@@ -180,7 +241,7 @@ export default function TripDetail() {
         <div className="flex justify-between items-baseline">
           <h1 className="text-2xl font-bold text-gray-900 leading-tight">{trip.name}</h1>
           <span className="text-xs font-bold px-2.5 py-1 bg-blue-100 text-blue-800 rounded-lg">
-            Default: {trip.defaultCurrency || trip.summaryCurrency || 'HKD'}
+            Default: {defaultCurrency}
           </span>
         </div>
         {trip.destination && (
@@ -201,23 +262,31 @@ export default function TripDetail() {
         </p>
       </div>
 
-      {/* 2. Compact Summary Panel */}
-      <div className="bg-white border border-gray-200 rounded-2xl p-4 shadow-xs mb-5">
-        {hasBudget ? (
-          <div className="grid grid-cols-3 gap-2 text-center">
-            <div>
+      {/* 2. Dual Currency Summary Panel */}
+      <div className="bg-white border border-gray-200 rounded-2xl p-4 shadow-xs mb-5 space-y-3">
+        {/* Spent Row with Dual Currency Display */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-gray-100 pb-2.5 gap-1">
+          <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Spent:</span>
+          <div className="text-right">
+            <span className="font-bold text-gray-900 text-base">
+              {formatCurrency(spentSummary.rawDefaultSpent, defaultCurrency)}
+            </span>
+            <span className="font-bold text-blue-600 text-base ml-1.5">
+              / {formatCurrency(spentSummary.baseSpent, baseCurrency)}
+            </span>
+          </div>
+        </div>
+
+        {/* Budget & Remaining (Base Currency only) */}
+        {hasBudget && (
+          <div className="grid grid-cols-2 gap-2 text-center pt-1 text-xs">
+            <div className="bg-gray-50 p-2 rounded-xl border border-gray-100">
               <div className="text-gray-400 font-medium text-[10px] uppercase tracking-wider">Budget</div>
               <div className="font-bold text-gray-900 text-sm mt-0.5 truncate">
                 {formatCurrency(trip.budget!, baseCurrency)}
               </div>
             </div>
-            <div>
-              <div className="text-gray-400 font-medium text-[10px] uppercase tracking-wider">Spent</div>
-              <div className="font-bold text-gray-900 text-sm mt-0.5 truncate">
-                {formatCurrency(spent, baseCurrency)}
-              </div>
-            </div>
-            <div>
+            <div className="bg-gray-50 p-2 rounded-xl border border-gray-100">
               <div className="text-gray-400 font-medium text-[10px] uppercase tracking-wider">Remaining</div>
               <div
                 className={`font-extrabold text-sm mt-0.5 truncate ${
@@ -228,14 +297,24 @@ export default function TripDetail() {
               </div>
             </div>
           </div>
-        ) : (
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-gray-500 font-medium">Spent:</span>
-            <span className="font-bold text-gray-900 text-base">
-              {formatCurrency(spent, baseCurrency)}
-            </span>
-          </div>
         )}
+
+        {/* Notes for other currencies or missing rates */}
+        <div className="space-y-1 pt-0.5">
+          {spentSummary.otherCurrenciesCount > 0 && (
+            <p className="text-[11px] text-gray-500 font-medium">
+              + {spentSummary.otherCurrenciesCount} expense{spentSummary.otherCurrenciesCount > 1 ? 's' : ''} in other currencies, included in {baseCurrency} total
+            </p>
+          )}
+          {spentSummary.missingRatesCount > 0 && (
+            <p className="text-[11px] text-amber-600 font-semibold flex items-center gap-1">
+              <span>⚠️</span>
+              <span>
+                {spentSummary.missingRatesCount} expense{spentSummary.missingRatesCount > 1 ? 's' : ''} not converted — rate unavailable
+              </span>
+            </p>
+          )}
+        </div>
       </div>
 
       {/* 3. Actions Row: Add Expense & Export */}
@@ -249,7 +328,7 @@ export default function TripDetail() {
         </button>
         <button
           id="btn-export-excel"
-          onClick={() => exportTripToExcel(trip, expenses)}
+          onClick={() => exportTripToExcel(trip, expenses, ratesMap)}
           className="min-h-[48px] px-4 bg-white border border-gray-200 hover:bg-gray-50 text-gray-800 font-medium rounded-xl text-sm shadow-xs active:scale-95 transition flex items-center justify-center gap-1"
           title="Export to Excel"
         >
@@ -314,7 +393,7 @@ export default function TripDetail() {
         </div>
       )}
 
-      {/* 5. Expense List or Empty State */}
+      {/* 5. Expense List */}
       <div>
         <div className="flex justify-between items-center mb-2 px-1">
           <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider">
@@ -344,7 +423,9 @@ export default function TripDetail() {
         ) : (
           <div className="space-y-2.5">
             {sortedExpenses.map((exp) => {
-              const hasDiffCurrency = exp.currency !== baseCurrency;
+              const rateDetails = ratesInfo[exp.currency];
+              const isBase = exp.currency === baseCurrency;
+              const converted = getExpenseConvertedAmount(exp);
               const splitList = exp.splitAmong && exp.splitAmong.length > 0 ? exp.splitAmong : ['Me'];
               const perPersonSplit = personSplitAmount(exp.amount, splitList.length);
 
@@ -352,7 +433,7 @@ export default function TripDetail() {
                 <div
                   key={exp.id}
                   id={`expense-row-${exp.id}`}
-                  className="bg-white border border-gray-200 rounded-xl p-3 shadow-xs hover:border-gray-300 transition"
+                  className="bg-white border border-gray-200 rounded-xl p-3.5 shadow-xs hover:border-gray-300 transition"
                 >
                   <div className="flex items-start justify-between gap-2">
                     {/* Left: Category badge, Description, Date */}
@@ -369,13 +450,8 @@ export default function TripDetail() {
                         {exp.description || 'Expense'}
                       </h3>
 
-                      {/* Secondary currency or split details */}
-                      <div className="text-[11px] text-gray-500 mt-0.5 space-y-0.5">
-                        {hasDiffCurrency && (
-                          <p className="text-gray-400">
-                            Original: {formatCurrency(exp.amount, exp.currency)} (rate: {exp.exchangeRate})
-                          </p>
-                        )}
+                      {/* Participant & Split details */}
+                      <div className="text-[11px] text-gray-500 mt-1 space-y-0.5">
                         <p className="text-gray-600">
                           💳 Paid by: <span className="font-medium text-gray-800">{exp.paidBy || 'Me'}</span>
                         </p>
@@ -385,12 +461,33 @@ export default function TripDetail() {
                       </div>
                     </div>
 
-                    {/* Right: Converted Amount + Actions */}
+                    {/* Right: Stacked Amount Display & Actions */}
                     <div className="flex flex-col items-end justify-between self-stretch">
                       <div className="text-right">
+                        {/* Line 1: Original Amount */}
                         <div className="text-base font-bold text-gray-900">
-                          {formatCurrency(exp.convertedAmount, baseCurrency)}
+                          {formatCurrency(exp.amount, exp.currency)}
                         </div>
+
+                        {/* Line 2: Converted Amount in Base Currency (if different) */}
+                        {!isBase && (
+                          <div className="text-xs font-semibold text-gray-500 mt-0.5">
+                            {converted !== null ? (
+                              <span>
+                                / {formatCurrency(converted, baseCurrency)}
+                                {rateDetails?.status === 'cached' && rateDetails.fetchedAt && (
+                                  <span className="text-[10px] text-amber-600 font-normal ml-1">
+                                    (as of {rateDetails.fetchedAt})
+                                  </span>
+                                )}
+                              </span>
+                            ) : (
+                              <span className="text-amber-600 font-medium">
+                                / ⚠️ rate unavailable
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
 
                       {/* Row Action Buttons */}
@@ -398,7 +495,7 @@ export default function TripDetail() {
                         <button
                           id={`btn-duplicate-exp-${exp.id}`}
                           onClick={() => handleDuplicateExpense(exp.id)}
-                          className="p-1 text-xs hover:bg-gray-100 rounded-md"
+                          className="p-1 text-xs hover:bg-gray-100 rounded-md text-gray-600"
                           title="Duplicate Expense"
                         >
                           📄
@@ -406,7 +503,7 @@ export default function TripDetail() {
                         <button
                           id={`btn-edit-exp-${exp.id}`}
                           onClick={() => navigate(`/trip/${trip.id}/expense/${exp.id}/edit`)}
-                          className="p-1 text-xs hover:bg-gray-100 rounded-md"
+                          className="p-1 text-xs hover:bg-gray-100 rounded-md text-gray-600"
                           title="Edit Expense"
                         >
                           ✏️

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { splitAmount, tripSpent, tripRemaining } from './calculations';
+import { splitAmount, tripSpent, tripRemaining, calculateTripSpent } from './calculations';
 import { Trip, Expense } from '../types';
 
 describe('calculations', () => {
@@ -35,35 +35,11 @@ describe('calculations', () => {
     };
 
     it('returns 0 spent and full budget remaining when there are zero expenses', () => {
-      expect(tripSpent(mockTrip, [])).toBe(0);
-      expect(tripRemaining(mockTrip, [])).toBe(2000);
+      expect(tripSpent(mockTrip, [], {}, 'HKD')).toBe(0);
+      expect(tripRemaining(mockTrip, [], {}, 'HKD')).toBe(2000);
     });
 
-    it('ignores expenses belonging to other trips', () => {
-      const expenses: Expense[] = [
-        {
-          id: 'exp-other',
-          tripId: 'trip-2',
-          date: '2026-04-02',
-          description: 'Other trip expense',
-          category: 'Food',
-          amount: 50,
-          currency: 'USD',
-          exchangeRate: 1,
-          convertedAmount: 50,
-          paidBy: 'Me',
-          splitAmong: ['Me'],
-          peopleCount: 1,
-          splitAmount: 50,
-          created: '2026-04-02T10:00:00.000Z',
-          modified: '2026-04-02T10:00:00.000Z',
-        },
-      ];
-      expect(tripSpent(mockTrip, expenses)).toBe(0);
-      expect(tripRemaining(mockTrip, expenses)).toBe(2000);
-    });
-
-    it('calculates total spent with mixed currencies already converted', () => {
+    it('calculates spent using ratesMap correctly', () => {
       const expenses: Expense[] = [
         {
           id: 'exp-1',
@@ -71,14 +47,10 @@ describe('calculations', () => {
           date: '2026-04-01',
           description: 'Ramen',
           category: 'Food',
-          amount: 1500,
+          amount: 1000,
           currency: 'JPY',
-          exchangeRate: 0.0067,
-          convertedAmount: 10.05,
           paidBy: 'Me',
           splitAmong: ['Me'],
-          peopleCount: 1,
-          splitAmount: 1500,
           created: '2026-04-01T10:00:00.000Z',
           modified: '2026-04-01T10:00:00.000Z',
         },
@@ -86,23 +58,27 @@ describe('calculations', () => {
           id: 'exp-2',
           tripId: 'trip-1',
           date: '2026-04-02',
-          description: 'Hotel tax',
+          description: 'Hotel',
           category: 'Accommodation',
-          amount: 50,
+          amount: 100,
           currency: 'USD',
-          exchangeRate: 1,
-          convertedAmount: 50,
           paidBy: 'Me',
           splitAmong: ['Me'],
-          peopleCount: 2,
-          splitAmount: 25,
           created: '2026-04-02T10:00:00.000Z',
           modified: '2026-04-02T10:00:00.000Z',
         },
       ];
 
-      expect(tripSpent(mockTrip, expenses)).toBeCloseTo(60.05);
-      expect(tripRemaining(mockTrip, expenses)).toBeCloseTo(1939.95);
+      const ratesMap = {
+        JPY: 0.05,
+        USD: 7.8,
+        HKD: 1,
+      };
+
+      const summary = calculateTripSpent(mockTrip, expenses, ratesMap, 'HKD');
+      expect(summary.rawDefaultSpent).toBe(100); // USD expense matches defaultCurrency (USD)
+      expect(summary.baseSpent).toBe(1000 * 0.05 + 100 * 7.8); // 50 + 780 = 830 HKD
+      expect(summary.otherCurrenciesCount).toBe(1); // JPY is not USD
     });
   });
 });

@@ -117,6 +117,8 @@ export function createExpense(expenseData: Omit<Expense, 'id' | 'created' | 'mod
     created: now,
     modified: now,
   };
+  delete newExpense.exchangeRate;
+  delete newExpense.convertedAmount;
 
   expenses.push(newExpense);
   saveExpenses(expenses);
@@ -127,12 +129,15 @@ export function updateExpense(updatedExpense: Expense): void {
   const expenses = getExpenses();
   const index = expenses.findIndex((e) => e.id === updatedExpense.id);
   if (index !== -1) {
-    expenses[index] = {
+    const cleaned = {
       ...updatedExpense,
       paidBy: updatedExpense.paidBy || 'Me',
       splitAmong: updatedExpense.splitAmong && updatedExpense.splitAmong.length > 0 ? updatedExpense.splitAmong : ['Me'],
       modified: new Date().toISOString(),
     };
+    delete cleaned.exchangeRate;
+    delete cleaned.convertedAmount;
+    expenses[index] = cleaned;
     saveExpenses(expenses);
   }
 }
