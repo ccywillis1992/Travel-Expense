@@ -44,7 +44,7 @@ To replace them with your custom logo assets, simply overwrite these PNG files w
 
 An automated GitHub Actions workflow deploys the project to GitHub Pages on every push to the `main` branch:
 
-1. **Repository Setup**: Ensure your GitHub repository name matches `/travel-expense-tracker/` (or update `base` in `vite.config.ts` if using a custom repository name).
-2. **Workflow File**: `.github/workflows/deploy.yml` runs `npm ci`, `npm run build`, and publishes `./dist` to GitHub Pages.
+1. **Repository Setup**: Base URL in `vite.config.ts` is configured for `/Travel-Expense/`. If your repository name is different, set `VITE_BASE_URL` or update `base` in `vite.config.ts`.
+2. **Workflow File**: `.github/workflows/deploy.yml` runs `npm install`, `npm run build`, and publishes `./dist` to GitHub Pages.
 3. **GitHub Settings**: Under `Settings > Pages`, ensure the source is set to `Deploy from a branch` and set the branch to `gh-pages` (or `GitHub Actions`).
 

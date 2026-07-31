@@ -5,7 +5,7 @@ import { defineConfig } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig(() => {
-  const baseUrl = process.env.NODE_ENV === 'production' ? '/travel-expense-tracker/' : '/';
+  const baseUrl = process.env.NODE_ENV === 'production' ? (process.env.VITE_BASE_URL || '/Travel-Expense/') : '/';
 
   return {
     base: baseUrl,
