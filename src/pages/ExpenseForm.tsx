@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, FormEvent } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Trip, Expense, ExpenseCategory } from '../types';
 import {
@@ -11,7 +11,8 @@ import {
   clearDraftExpense,
 } from '../lib/storage';
 import { SUPPORTED_CURRENCIES, CATEGORIES, fetchExchangeRate } from '../lib/currency';
-import { splitAmount } from '../lib/calculations';
+import { personSplitAmount } from '../lib/calculations';
+import { getSettings } from '../lib/settings';
 
 const CATEGORY_ICONS: Record<ExpenseCategory, string> = {
   Food: '🍔',
@@ -31,6 +32,7 @@ export default function ExpenseForm() {
   const navigate = useNavigate();
   const isEditMode = Boolean(expenseId);
 
+  const baseCurrency = getSettings().baseCurrency;
   const amountInputRef = useRef<HTMLInputElement>(null);
 
   const [trip, setTrip] = useState<Trip | null>(null);
@@ -38,11 +40,12 @@ export default function ExpenseForm() {
 
   // Form states
   const [amount, setAmount] = useState<string>('');
-  const [currency, setCurrency] = useState<string>('EUR');
+  const [currency, setCurrency] = useState<string>(baseCurrency);
   const [category, setCategory] = useState<ExpenseCategory>('Food');
   const [description, setDescription] = useState<string>('');
   const [date, setDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
-  const [peopleCount, setPeopleCount] = useState<string>('1');
+  const [paidBy, setPaidBy] = useState<string>('Me');
+  const [splitAmong, setSplitAmong] = useState<string[]>(['Me']);
   const [exchangeRate, setExchangeRate] = useState<string>('1');
 
   // Async & UI states
@@ -58,6 +61,7 @@ export default function ExpenseForm() {
     amount?: string;
     category?: string;
     currency?: string;
+    splitAmong?: string;
   }>({});
 
   // 1. Load Trip & Existing Expense (or Draft)
@@ -72,8 +76,12 @@ export default function ExpenseForm() {
     }
     setTrip(foundTrip);
 
+    const tripParticipants = foundTrip.participants && foundTrip.participants.length > 0
+      ? foundTrip.participants
+      : ['Me'];
+
     if (isEditMode && expenseId) {
-      // Edit mode: prefill existing expense without auto-fetching new exchange rate
+      // Edit mode
       const allExpenses = getExpenses();
       const foundExpense = allExpenses.find((e) => e.id === expenseId);
       if (foundExpense) {
@@ -83,13 +91,21 @@ export default function ExpenseForm() {
         setCategory(foundExpense.category);
         setDescription(foundExpense.description || '');
         setDate(foundExpense.date);
-        setPeopleCount(foundExpense.peopleCount ? foundExpense.peopleCount.toString() : '1');
+        setPaidBy(foundExpense.paidBy || tripParticipants[0] || 'Me');
+        setSplitAmong(
+          foundExpense.splitAmong && foundExpense.splitAmong.length > 0
+            ? foundExpense.splitAmong
+            : tripParticipants
+        );
         setExchangeRate(foundExpense.exchangeRate ? foundExpense.exchangeRate.toString() : '1');
       }
     } else {
-      // New mode: default currency to trip summary currency
-      setCurrency(foundTrip.summaryCurrency);
-      setExchangeRate('1');
+      // New mode
+      const defaultCurr = foundTrip.defaultCurrency || baseCurrency;
+      setCurrency(defaultCurr);
+      setPaidBy(tripParticipants[0] || 'Me');
+      setSplitAmong([...tripParticipants]);
+      setExchangeRate(defaultCurr === baseCurrency ? '1' : '1');
 
       if (duplicateFromId) {
         const allExpenses = getExpenses();
@@ -100,7 +116,12 @@ export default function ExpenseForm() {
           setCategory(foundExpense.category);
           setDescription(foundExpense.description || '');
           setDate(new Date().toISOString().split('T')[0]);
-          setPeopleCount(foundExpense.peopleCount ? foundExpense.peopleCount.toString() : '1');
+          setPaidBy(foundExpense.paidBy || tripParticipants[0] || 'Me');
+          setSplitAmong(
+            foundExpense.splitAmong && foundExpense.splitAmong.length > 0
+              ? foundExpense.splitAmong
+              : tripParticipants
+          );
           setExchangeRate(foundExpense.exchangeRate ? foundExpense.exchangeRate.toString() : '1');
         }
       } else {
@@ -112,7 +133,7 @@ export default function ExpenseForm() {
         }
       }
     }
-  }, [tripId, expenseId, isEditMode, duplicateFromId]);
+  }, [tripId, expenseId, isEditMode, duplicateFromId, baseCurrency]);
 
   // Autofocus amount input on mount
   useEffect(() => {
@@ -129,7 +150,6 @@ export default function ExpenseForm() {
     const handler = setTimeout(() => {
       const numAmount = Number(amount);
       const numRate = Number(exchangeRate) || 1;
-      const numPeople = Number(peopleCount) || 1;
 
       saveDraftExpense({
         tripId,
@@ -138,13 +158,14 @@ export default function ExpenseForm() {
         category,
         description,
         date,
-        peopleCount: numPeople,
+        paidBy,
+        splitAmong,
         exchangeRate: numRate,
       });
     }, 400);
 
     return () => clearTimeout(handler);
-  }, [amount, currency, category, description, date, peopleCount, exchangeRate, isEditMode, tripId, draftBannerVisible]);
+  }, [amount, currency, category, description, date, paidBy, splitAmong, exchangeRate, isEditMode, tripId, draftBannerVisible]);
 
   // Restore draft
   const handleRestoreDraft = () => {
@@ -154,7 +175,8 @@ export default function ExpenseForm() {
     if (draftData.category) setCategory(draftData.category);
     if (draftData.description !== undefined) setDescription(draftData.description);
     if (draftData.date) setDate(draftData.date);
-    if (draftData.peopleCount !== undefined) setPeopleCount(draftData.peopleCount.toString());
+    if (draftData.paidBy) setPaidBy(draftData.paidBy);
+    if (draftData.splitAmong) setSplitAmong(draftData.splitAmong);
     if (draftData.exchangeRate !== undefined) setExchangeRate(draftData.exchangeRate.toString());
     setDraftBannerVisible(false);
   };
@@ -171,12 +193,10 @@ export default function ExpenseForm() {
     setCurrency(newCurrency);
     setRateError(null);
 
-    if (!trip) return;
-
-    if (newCurrency === trip.summaryCurrency) {
+    if (newCurrency === baseCurrency) {
       setExchangeRate('1');
     } else {
-      await updateExchangeRate(newCurrency, trip.summaryCurrency);
+      await updateExchangeRate(newCurrency, baseCurrency);
     }
   };
 
@@ -203,16 +223,27 @@ export default function ExpenseForm() {
   };
 
   const handleManualRefreshRate = () => {
-    if (!trip) return;
-    updateExchangeRate(currency, trip.summaryCurrency);
+    updateExchangeRate(currency, baseCurrency);
+  };
+
+  const toggleSplitParticipant = (person: string) => {
+    if (splitAmong.includes(person)) {
+      if (splitAmong.length <= 1) {
+        setErrors((prev) => ({ ...prev, splitAmong: 'Must split among at least 1 person' }));
+        return;
+      }
+      setSplitAmong(splitAmong.filter((p) => p !== person));
+    } else {
+      setSplitAmong([...splitAmong, person]);
+    }
+    setErrors((prev) => ({ ...prev, splitAmong: undefined }));
   };
 
   // Calculations
   const numAmount = Number(amount) || 0;
   const numRate = Number(exchangeRate) || 1;
-  const numPeople = Number(peopleCount) || 1;
   const convertedAmount = numAmount * numRate;
-  const currentSplitAmount = splitAmount(numAmount, numPeople);
+  const currentSplitAmount = personSplitAmount(numAmount, splitAmong.length);
 
   // Validation
   const validate = () => {
@@ -226,18 +257,20 @@ export default function ExpenseForm() {
     if (!currency) {
       newErrors.currency = 'Currency is required';
     }
+    if (!splitAmong || splitAmong.length === 0) {
+      newErrors.splitAmong = 'Select at least 1 person to split among';
+    }
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = (e: FormEvent) => {
     e.preventDefault();
     if (!validate() || !trip) return;
 
     const finalAmount = Number(amount);
-    const finalRate = currency === trip.summaryCurrency ? 1 : Number(exchangeRate) || 1;
+    const finalRate = currency === baseCurrency ? 1 : Number(exchangeRate) || 1;
     const finalConverted = finalAmount * finalRate;
-    const finalPeople = Math.max(1, Number(peopleCount) || 1);
 
     if (isEditMode && existingExpense) {
       updateExpense({
@@ -247,10 +280,10 @@ export default function ExpenseForm() {
         category,
         description: description.trim(),
         date,
-        peopleCount: finalPeople,
+        paidBy,
+        splitAmong,
         exchangeRate: finalRate,
         convertedAmount: finalConverted,
-        splitAmount: finalAmount / finalPeople,
       });
     } else {
       createExpense({
@@ -260,10 +293,10 @@ export default function ExpenseForm() {
         category,
         description: description.trim(),
         date,
-        peopleCount: finalPeople,
+        paidBy,
+        splitAmong,
         exchangeRate: finalRate,
         convertedAmount: finalConverted,
-        splitAmount: finalAmount / finalPeople,
       });
       clearDraftExpense();
     }
@@ -297,7 +330,8 @@ export default function ExpenseForm() {
     );
   }
 
-  const isDifferentCurrency = currency !== trip.summaryCurrency;
+  const isDifferentCurrency = currency !== baseCurrency;
+  const tripParticipants = trip.participants && trip.participants.length > 0 ? trip.participants : ['Me'];
 
   return (
     <div className="max-w-md mx-auto min-h-screen p-4 pb-12 bg-white">
@@ -347,7 +381,7 @@ export default function ExpenseForm() {
       )}
 
       <form onSubmit={handleSave} className="space-y-4" noValidate>
-        {/* 1. Amount Input (Large & Prominent) */}
+        {/* 1. Amount Input */}
         <div>
           <label htmlFor="expense-amount" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
             Amount <span className="text-red-500">*</span>
@@ -391,7 +425,7 @@ export default function ExpenseForm() {
           >
             {SUPPORTED_CURRENCIES.map((curr) => (
               <option key={curr} value={curr}>
-                {curr} {curr === trip.summaryCurrency ? '(Trip Summary)' : ''}
+                {curr} {curr === baseCurrency ? `(Base)` : curr === trip.defaultCurrency ? `(Trip Default)` : ''}
               </option>
             ))}
           </select>
@@ -429,7 +463,7 @@ export default function ExpenseForm() {
           {errors.category && <p className="text-xs text-red-600 mt-1">{errors.category}</p>}
         </div>
 
-        {/* 4. Description (Optional) */}
+        {/* 4. Description */}
         <div>
           <label htmlFor="expense-description" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
             Description
@@ -458,40 +492,73 @@ export default function ExpenseForm() {
           />
         </div>
 
-        {/* 6. People Count & Split Amount */}
-        <div className="grid grid-cols-2 gap-3 items-end bg-gray-50 border border-gray-200 p-3 rounded-2xl">
+        {/* 6. Paid By & Split Among Section */}
+        <div className="bg-gray-50 border border-gray-200 p-3.5 rounded-2xl space-y-3">
+          {/* Paid By */}
           <div>
-            <label htmlFor="expense-people-count" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
-              👥 People Count
+            <label htmlFor="expense-paid-by" className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1">
+              💳 Paid By
             </label>
-            <input
-              id="expense-people-count"
-              type="number"
-              min="1"
-              value={peopleCount}
-              onChange={(e) => setPeopleCount(e.target.value)}
-              className="w-full min-h-[42px] px-3 py-2 border border-gray-300 rounded-xl text-base bg-white font-semibold focus:outline-none focus:ring-2 focus:ring-blue-200"
-            />
+            <select
+              id="expense-paid-by"
+              value={paidBy}
+              onChange={(e) => setPaidBy(e.target.value)}
+              className="w-full min-h-[42px] px-3 py-2 border border-gray-300 rounded-xl text-sm bg-white font-semibold focus:outline-none focus:ring-2 focus:ring-blue-200"
+            >
+              {tripParticipants.map((person) => (
+                <option key={person} value={person}>
+                  👤 {person}
+                </option>
+              ))}
+            </select>
           </div>
+
+          {/* Split Among */}
           <div>
-            <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1">
-              Per Person ({currency})
-            </div>
-            <div className="min-h-[42px] px-3 py-2 bg-white border border-gray-200 rounded-xl text-base font-bold text-blue-700 flex items-center">
-              {currentSplitAmount.toLocaleString(undefined, {
-                minimumFractionDigits: 2,
-                maximumFractionDigits: 2,
+            <label className="block text-xs font-bold text-gray-700 uppercase tracking-wider mb-1.5">
+              👥 Split Among ({splitAmong.length} {splitAmong.length === 1 ? 'person' : 'people'})
+            </label>
+            <div className="flex flex-wrap gap-2">
+              {tripParticipants.map((person) => {
+                const isChecked = splitAmong.includes(person);
+                return (
+                  <button
+                    key={person}
+                    type="button"
+                    onClick={() => toggleSplitParticipant(person)}
+                    className={`min-h-[38px] px-3 py-1.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition active:scale-95 ${
+                      isChecked
+                        ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
+                        : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'
+                    }`}
+                  >
+                    <span>{isChecked ? '☑️' : '⏹️'}</span>
+                    <span>{person}</span>
+                  </button>
+                );
               })}
             </div>
+            {errors.splitAmong && <p className="text-xs text-red-600 mt-1">{errors.splitAmong}</p>}
+          </div>
+
+          {/* Calculated Per-Person Split Display */}
+          <div className="pt-1 border-t border-gray-200/80 flex items-center justify-between text-xs font-medium text-gray-700">
+            <span>Split Amount:</span>
+            <span className="font-bold text-blue-700 text-sm">
+              {currency} {currentSplitAmount.toLocaleString(undefined, {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })} / person
+            </span>
           </div>
         </div>
 
-        {/* 7. Exchange Rate Row (Only visible if currency != summaryCurrency) */}
+        {/* 7. Exchange Rate Row (Only visible if currency != baseCurrency) */}
         {isDifferentCurrency && (
           <div className="bg-amber-50/70 border border-amber-200 p-3.5 rounded-2xl space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-amber-900 uppercase tracking-wider">
-                Exchange Rate (1 {currency} = ? {trip.summaryCurrency})
+                Exchange Rate (1 {currency} = ? {baseCurrency})
               </span>
               <button
                 id="btn-refresh-exchange-rate"
@@ -521,7 +588,7 @@ export default function ExpenseForm() {
 
               <div>
                 <div className="text-[11px] font-semibold text-amber-800 mb-0.5">
-                  Converted Total ({trip.summaryCurrency})
+                  Converted Total ({baseCurrency})
                 </div>
                 <div className="min-h-[40px] px-3 py-1.5 bg-amber-100/60 border border-amber-300 rounded-xl text-sm font-extrabold text-amber-950 flex items-center">
                   {convertedAmount.toLocaleString(undefined, {
@@ -531,6 +598,10 @@ export default function ExpenseForm() {
                 </div>
               </div>
             </div>
+
+            <p className="text-[11px] text-amber-800 italic">
+              converted to {baseCurrency}
+            </p>
 
             {rateError && (
               <p className="text-xs text-red-600 font-medium">{rateError}</p>

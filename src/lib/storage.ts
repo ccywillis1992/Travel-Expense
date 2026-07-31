@@ -108,13 +108,11 @@ export function deleteTrip(tripId: string): void {
 export function createExpense(expenseData: Omit<Expense, 'id' | 'created' | 'modified'>): Expense {
   const expenses = getExpenses();
   const now = new Date().toISOString();
-  const peopleCount = expenseData.peopleCount > 0 ? expenseData.peopleCount : 1;
-  const splitAmount = expenseData.amount / peopleCount;
 
   const newExpense: Expense = {
     ...expenseData,
-    peopleCount,
-    splitAmount: isNaN(splitAmount) ? expenseData.amount : splitAmount,
+    paidBy: expenseData.paidBy || 'Me',
+    splitAmong: expenseData.splitAmong && expenseData.splitAmong.length > 0 ? expenseData.splitAmong : ['Me'],
     id: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `exp_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
     created: now,
     modified: now,
@@ -129,13 +127,10 @@ export function updateExpense(updatedExpense: Expense): void {
   const expenses = getExpenses();
   const index = expenses.findIndex((e) => e.id === updatedExpense.id);
   if (index !== -1) {
-    const peopleCount = updatedExpense.peopleCount > 0 ? updatedExpense.peopleCount : 1;
-    const splitAmount = updatedExpense.amount / peopleCount;
-
     expenses[index] = {
       ...updatedExpense,
-      peopleCount,
-      splitAmount: isNaN(splitAmount) ? updatedExpense.amount : splitAmount,
+      paidBy: updatedExpense.paidBy || 'Me',
+      splitAmong: updatedExpense.splitAmong && updatedExpense.splitAmong.length > 0 ? updatedExpense.splitAmong : ['Me'],
       modified: new Date().toISOString(),
     };
     saveExpenses(expenses);

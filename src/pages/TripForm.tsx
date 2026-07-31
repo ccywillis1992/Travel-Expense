@@ -1,23 +1,25 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, FormEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Trip } from '../types';
 import { getTrips, createTrip, updateTrip } from '../lib/storage';
 import { SUPPORTED_CURRENCIES } from '../lib/currency';
+import { getSettings } from '../lib/settings';
 
 export default function TripForm() {
   const { tripId } = useParams<{ tripId?: string }>();
   const navigate = useNavigate();
   const isEditMode = Boolean(tripId);
+  const baseCurrency = getSettings().baseCurrency;
 
   const [name, setName] = useState('');
   const [destination, setDestination] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [budget, setBudget] = useState<string>('');
-  const [summaryCurrency, setSummaryCurrency] = useState('EUR');
-  
-  // Track original currency in Edit mode for warning
-  const [originalCurrency, setOriginalCurrency] = useState('');
+  const [defaultCurrency, setDefaultCurrency] = useState('HKD');
+  const [participants, setParticipants] = useState<string[]>(['Me']);
+  const [newParticipantName, setNewParticipantName] = useState('');
+
   const [existingTrip, setExistingTrip] = useState<Trip | null>(null);
 
   // Errors state
@@ -26,6 +28,7 @@ export default function TripForm() {
     destination?: string;
     budget?: string;
     dateRange?: string;
+    participants?: string;
   }>({});
 
   useEffect(() => {
@@ -38,17 +41,41 @@ export default function TripForm() {
         setDestination(found.destination || '');
         setStartDate(found.startDate || '');
         setEndDate(found.endDate || '');
-        setBudget(found.budget.toString());
-        setSummaryCurrency(found.summaryCurrency || 'EUR');
-        setOriginalCurrency(found.summaryCurrency || 'EUR');
+        setBudget(found.budget !== null && found.budget !== undefined ? found.budget.toString() : '');
+        setDefaultCurrency(found.defaultCurrency || found.summaryCurrency || 'HKD');
+        setParticipants(
+          found.participants && found.participants.length > 0 ? found.participants : ['Me']
+        );
       }
+    } else {
+      setDefaultCurrency(baseCurrency);
     }
-  }, [tripId, isEditMode]);
+  }, [tripId, isEditMode, baseCurrency]);
 
-  // Date range inline validation check
   const isDateRangeInvalid = Boolean(
     startDate && endDate && new Date(endDate) < new Date(startDate)
   );
+
+  const addParticipant = () => {
+    const trimmed = newParticipantName.trim();
+    if (!trimmed) return;
+    if (participants.some((p) => p.toLowerCase() === trimmed.toLowerCase())) {
+      setErrors((prev) => ({ ...prev, participants: 'Participant already exists' }));
+      return;
+    }
+    setParticipants([...participants, trimmed]);
+    setNewParticipantName('');
+    setErrors((prev) => ({ ...prev, participants: undefined }));
+  };
+
+  const removeParticipant = (nameToRemove: string) => {
+    if (participants.length <= 1) {
+      setErrors((prev) => ({ ...prev, participants: 'Trip must have at least 1 participant' }));
+      return;
+    }
+    setParticipants(participants.filter((p) => p !== nameToRemove));
+    setErrors((prev) => ({ ...prev, participants: undefined }));
+  };
 
   const validate = () => {
     const newErrors: typeof errors = {};
@@ -58,21 +85,24 @@ export default function TripForm() {
     if (!destination.trim()) {
       newErrors.destination = 'Destination is required';
     }
-    if (budget === '' || isNaN(Number(budget)) || Number(budget) < 0) {
-      newErrors.budget = 'Please enter a valid budget amount (>= 0)';
+    if (budget.trim() !== '' && (isNaN(Number(budget)) || Number(budget) < 0)) {
+      newErrors.budget = 'Budget must be a valid number >= 0';
     }
     if (isDateRangeInvalid) {
       newErrors.dateRange = 'End date cannot be earlier than start date';
+    }
+    if (participants.length === 0) {
+      newErrors.participants = 'Trip must have at least 1 participant';
     }
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = (e: FormEvent) => {
     e.preventDefault();
     if (!validate()) return;
 
-    const numericBudget = Number(budget);
+    const numericBudget = budget.trim() === '' ? null : Number(budget);
 
     if (isEditMode && existingTrip) {
       const updated: Trip = {
@@ -82,7 +112,8 @@ export default function TripForm() {
         startDate,
         endDate,
         budget: numericBudget,
-        summaryCurrency,
+        defaultCurrency,
+        participants,
       };
       updateTrip(updated);
       navigate(`/trip/${existingTrip.id}`);
@@ -93,7 +124,8 @@ export default function TripForm() {
         startDate,
         endDate,
         budget: numericBudget,
-        summaryCurrency,
+        defaultCurrency,
+        participants,
       });
       navigate(`/trip/${created.id}`);
     }
@@ -138,7 +170,7 @@ export default function TripForm() {
         <h1 className="text-xl font-bold text-gray-900">
           {isEditMode ? '✏️ Edit Trip' : '➕ New Trip'}
         </h1>
-        <div className="w-11" /> {/* Spacer for balance */}
+        <div className="w-11" />
       </div>
 
       <form onSubmit={handleSave} className="space-y-5" noValidate>
@@ -217,18 +249,18 @@ export default function TripForm() {
           <p className="text-xs text-red-600 mt-0.5">⚠️ End date cannot be before start date.</p>
         )}
 
-        {/* Budget & Currency Row */}
+        {/* Budget & Default Currency Row */}
         <div className="grid grid-cols-3 gap-3">
           <div className="col-span-2">
             <label htmlFor="trip-budget" className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1">
-              Budget <span className="text-red-500">*</span>
+              Budget ({baseCurrency}) <span className="text-gray-400 font-normal lowercase">(optional)</span>
             </label>
             <input
               id="trip-budget"
               type="number"
               step="any"
               min="0"
-              placeholder="0.00"
+              placeholder="Leave blank for no budget"
               value={budget}
               onChange={(e) => {
                 setBudget(e.target.value);
@@ -243,12 +275,12 @@ export default function TripForm() {
 
           <div>
             <label htmlFor="trip-currency" className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1">
-              Currency
+              Default Currency
             </label>
             <select
               id="trip-currency"
-              value={summaryCurrency}
-              onChange={(e) => setSummaryCurrency(e.target.value)}
+              value={defaultCurrency}
+              onChange={(e) => setDefaultCurrency(e.target.value)}
               className="w-full min-h-[44px] px-2.5 py-2 border border-gray-300 rounded-xl text-base bg-white font-medium focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-500"
             >
               {SUPPORTED_CURRENCIES.map((curr) => (
@@ -260,12 +292,58 @@ export default function TripForm() {
           </div>
         </div>
 
-        {/* Warning if summary currency changes in Edit Mode */}
-        {isEditMode && summaryCurrency !== originalCurrency && (
-          <div className="bg-amber-50 border border-amber-200 text-amber-800 rounded-xl p-3 text-xs leading-relaxed">
-            ⚠️ <strong>Note:</strong> Changing the summary currency will not automatically convert existing historical expenses.
+        {/* Trip Participants */}
+        <div>
+          <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1">
+            Trip Participants
+          </label>
+          <div className="flex gap-2 mb-2">
+            <input
+              id="input-participant-name"
+              type="text"
+              placeholder="Add name (e.g. Alice)"
+              value={newParticipantName}
+              onChange={(e) => setNewParticipantName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  addParticipant();
+                }
+              }}
+              className="flex-1 min-h-[44px] px-3.5 py-2 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-500"
+            />
+            <button
+              id="btn-add-participant"
+              type="button"
+              onClick={addParticipant}
+              className="min-h-[44px] px-4 bg-gray-100 hover:bg-gray-200 text-gray-800 font-semibold text-xs rounded-xl transition"
+            >
+              ➕ Add
+            </button>
           </div>
-        )}
+
+          <div className="flex flex-wrap gap-1.5">
+            {participants.map((person) => (
+              <span
+                key={person}
+                className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 bg-blue-50 text-blue-800 rounded-lg border border-blue-200"
+              >
+                👤 {person}
+                {participants.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => removeParticipant(person)}
+                    className="hover:text-red-600 ml-0.5 text-xs font-bold"
+                    title={`Remove ${person}`}
+                  >
+                    ×
+                  </button>
+                )}
+              </span>
+            ))}
+          </div>
+          {errors.participants && <p className="text-xs text-red-600 mt-1">{errors.participants}</p>}
+        </div>
 
         {/* Action Buttons */}
         <div className="pt-4 flex items-center gap-3">

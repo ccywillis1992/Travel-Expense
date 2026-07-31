@@ -1,19 +1,21 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Trip, Expense, ExpenseCategory } from '../types';
+import { Trip, Expense } from '../types';
 import { getTrips, getExpensesForTrip, deleteTrip, deleteExpense } from '../lib/storage';
-import { tripSpent, tripRemaining } from '../lib/calculations';
+import { tripSpent, tripRemaining, personSplitAmount } from '../lib/calculations';
 import { CATEGORIES } from '../lib/currency';
 import { exportTripToExcel } from '../lib/export';
+import { getSettings } from '../lib/settings';
 import ConfirmModal from '../components/ConfirmModal';
 
 export default function TripDetail() {
   const { tripId } = useParams<{ tripId: string }>();
   const navigate = useNavigate();
+  const baseCurrency = getSettings().baseCurrency;
 
   const [trip, setTrip] = useState<Trip | null>(null);
   const [expenses, setExpenses] = useState<Expense[]>([]);
-  
+
   // Filter & Sort state
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -113,12 +115,13 @@ export default function TripDetail() {
 
   const spent = tripSpent(trip, expenses);
   const remaining = tripRemaining(trip, expenses);
-  const isOverBudget = remaining < 0;
+  const hasBudget = trip.budget !== null && trip.budget !== undefined;
+  const isOverBudget = hasBudget && remaining! < 0;
 
   // Filter expenses
   const filteredExpenses = expenses.filter((e) => {
     const matchesCategory = selectedCategory === 'ALL' || e.category === selectedCategory;
-    const matchesQuery = searchQuery.trim() === '' || 
+    const matchesQuery = searchQuery.trim() === '' ||
       e.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
       e.category.toLowerCase().includes(searchQuery.toLowerCase());
     return matchesCategory && matchesQuery;
@@ -136,6 +139,8 @@ export default function TripDetail() {
       return sortOrder === 'desc' ? amountB - amountA : amountA - amountB;
     }
   });
+
+  const tripParticipants = trip.participants && trip.participants.length > 0 ? trip.participants : ['Me'];
 
   return (
     <div className="max-w-md mx-auto min-h-screen p-4 pb-20 bg-gray-50">
@@ -175,7 +180,7 @@ export default function TripDetail() {
         <div className="flex justify-between items-baseline">
           <h1 className="text-2xl font-bold text-gray-900 leading-tight">{trip.name}</h1>
           <span className="text-xs font-bold px-2.5 py-1 bg-blue-100 text-blue-800 rounded-lg">
-            {trip.summaryCurrency}
+            Default: {trip.defaultCurrency || trip.summaryCurrency || 'HKD'}
           </span>
         </div>
         {trip.destination && (
@@ -186,34 +191,51 @@ export default function TripDetail() {
             🗓️ {trip.startDate} {trip.endDate ? `– ${trip.endDate}` : ''}
           </p>
         )}
+        <p className="text-xs text-gray-500 mt-1 flex flex-wrap gap-1 items-center">
+          <span>👥 Participants:</span>
+          {tripParticipants.map((person) => (
+            <span key={person} className="bg-gray-200 text-gray-800 px-1.5 py-0.5 rounded-md font-medium text-[11px]">
+              {person}
+            </span>
+          ))}
+        </p>
       </div>
 
       {/* 2. Compact Summary Panel */}
       <div className="bg-white border border-gray-200 rounded-2xl p-4 shadow-xs mb-5">
-        <div className="grid grid-cols-3 gap-2 text-center">
-          <div>
-            <div className="text-gray-400 font-medium text-[10px] uppercase tracking-wider">Budget</div>
-            <div className="font-bold text-gray-900 text-sm mt-0.5 truncate">
-              {formatCurrency(trip.budget, trip.summaryCurrency)}
+        {hasBudget ? (
+          <div className="grid grid-cols-3 gap-2 text-center">
+            <div>
+              <div className="text-gray-400 font-medium text-[10px] uppercase tracking-wider">Budget</div>
+              <div className="font-bold text-gray-900 text-sm mt-0.5 truncate">
+                {formatCurrency(trip.budget!, baseCurrency)}
+              </div>
+            </div>
+            <div>
+              <div className="text-gray-400 font-medium text-[10px] uppercase tracking-wider">Spent</div>
+              <div className="font-bold text-gray-900 text-sm mt-0.5 truncate">
+                {formatCurrency(spent, baseCurrency)}
+              </div>
+            </div>
+            <div>
+              <div className="text-gray-400 font-medium text-[10px] uppercase tracking-wider">Remaining</div>
+              <div
+                className={`font-extrabold text-sm mt-0.5 truncate ${
+                  isOverBudget ? 'text-red-600' : 'text-emerald-600'
+                }`}
+              >
+                {formatCurrency(remaining!, baseCurrency)}
+              </div>
             </div>
           </div>
-          <div>
-            <div className="text-gray-400 font-medium text-[10px] uppercase tracking-wider">Spent</div>
-            <div className="font-bold text-gray-900 text-sm mt-0.5 truncate">
-              {formatCurrency(spent, trip.summaryCurrency)}
-            </div>
+        ) : (
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-gray-500 font-medium">Spent:</span>
+            <span className="font-bold text-gray-900 text-base">
+              {formatCurrency(spent, baseCurrency)}
+            </span>
           </div>
-          <div>
-            <div className="text-gray-400 font-medium text-[10px] uppercase tracking-wider">Remaining</div>
-            <div
-              className={`font-extrabold text-sm mt-0.5 truncate ${
-                isOverBudget ? 'text-red-600' : 'text-emerald-600'
-              }`}
-            >
-              {formatCurrency(remaining, trip.summaryCurrency)}
-            </div>
-          </div>
-        </div>
+        )}
       </div>
 
       {/* 3. Actions Row: Add Expense & Export */}
@@ -322,7 +344,9 @@ export default function TripDetail() {
         ) : (
           <div className="space-y-2.5">
             {sortedExpenses.map((exp) => {
-              const hasDiffCurrency = exp.currency !== trip.summaryCurrency;
+              const hasDiffCurrency = exp.currency !== baseCurrency;
+              const splitList = exp.splitAmong && exp.splitAmong.length > 0 ? exp.splitAmong : ['Me'];
+              const perPersonSplit = personSplitAmount(exp.amount, splitList.length);
 
               return (
                 <div
@@ -352,11 +376,12 @@ export default function TripDetail() {
                             Original: {formatCurrency(exp.amount, exp.currency)} (rate: {exp.exchangeRate})
                           </p>
                         )}
-                        {exp.peopleCount > 1 && (
-                          <p className="text-blue-600 font-medium">
-                            👥 {exp.peopleCount} people ({formatCurrency(exp.splitAmount, exp.currency)}/person)
-                          </p>
-                        )}
+                        <p className="text-gray-600">
+                          💳 Paid by: <span className="font-medium text-gray-800">{exp.paidBy || 'Me'}</span>
+                        </p>
+                        <p className="text-blue-600 font-medium">
+                          👥 Split among: {splitList.join(', ')} ({formatCurrency(perPersonSplit, exp.currency)}/person)
+                        </p>
                       </div>
                     </div>
 
@@ -364,7 +389,7 @@ export default function TripDetail() {
                     <div className="flex flex-col items-end justify-between self-stretch">
                       <div className="text-right">
                         <div className="text-base font-bold text-gray-900">
-                          {formatCurrency(exp.convertedAmount, trip.summaryCurrency)}
+                          {formatCurrency(exp.convertedAmount, baseCurrency)}
                         </div>
                       </div>
 

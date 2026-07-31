@@ -3,12 +3,14 @@ import { useNavigate } from 'react-router-dom';
 import { Trip, Expense } from '../types';
 import { getTrips, getExpenses, getStorageUsageBytes } from '../lib/storage';
 import { tripSpent, tripRemaining } from '../lib/calculations';
+import { getSettings } from '../lib/settings';
 
 export default function Trips() {
   const navigate = useNavigate();
   const [trips, setTrips] = useState<Trip[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [storageBytes, setStorageBytes] = useState<number>(0);
+  const baseCurrency = getSettings().baseCurrency;
 
   useEffect(() => {
     loadData();
@@ -43,19 +45,29 @@ export default function Trips() {
     <div className="max-w-md mx-auto min-h-screen flex flex-col justify-between p-4 pb-20">
       <div>
         {/* Header */}
-        <div className="flex items-center justify-between mb-6 pt-2">
+        <div className="flex items-center justify-between mb-6 pt-2 border-b border-gray-100 pb-3">
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-gray-900">Travel Expenses</h1>
-            <p className="text-xs text-gray-500 mt-0.5">Offline-first trip budget tracker</p>
+            <p className="text-xs text-gray-500 mt-0.5">Base currency: <strong>{baseCurrency}</strong></p>
           </div>
-          <button
-            id="btn-new-trip-header"
-            onClick={() => navigate('/trip/new')}
-            className="min-h-[44px] min-w-[44px] px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-base font-medium shadow-sm active:scale-95 transition flex items-center gap-1"
-            title="Create New Trip"
-          >
-            ➕ <span className="text-sm font-semibold">New</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              id="btn-settings-header"
+              onClick={() => navigate('/settings')}
+              className="min-h-[44px] min-w-[44px] px-2.5 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-lg font-medium active:scale-95 transition flex items-center justify-center"
+              title="Settings"
+            >
+              ⚙️
+            </button>
+            <button
+              id="btn-new-trip-header"
+              onClick={() => navigate('/trip/new')}
+              className="min-h-[44px] px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-base font-medium shadow-xs active:scale-95 transition flex items-center gap-1"
+              title="Create New Trip"
+            >
+              ➕ <span className="text-sm font-semibold">New</span>
+            </button>
+          </div>
         </div>
 
         {/* Trips List or Empty State */}
@@ -77,7 +89,8 @@ export default function Trips() {
             {trips.map((trip) => {
               const spent = tripSpent(trip, expenses);
               const remaining = tripRemaining(trip, expenses);
-              const isOverBudget = remaining < 0;
+              const hasBudget = trip.budget !== null && trip.budget !== undefined;
+              const isOverBudget = hasBudget && remaining! < 0;
 
               return (
                 <div
@@ -89,7 +102,7 @@ export default function Trips() {
                   <div className="flex justify-between items-start mb-1">
                     <h2 className="text-lg font-bold text-gray-900 leading-snug">{trip.name}</h2>
                     <span className="text-xs font-semibold px-2 py-0.5 bg-gray-100 text-gray-700 rounded-md uppercase tracking-wider">
-                      {trip.summaryCurrency}
+                      Default: {trip.defaultCurrency || trip.summaryCurrency || 'HKD'}
                     </span>
                   </div>
 
@@ -104,30 +117,39 @@ export default function Trips() {
                   )}
 
                   {/* Summary Bar */}
-                  <div className="bg-gray-50 rounded-xl p-3 border border-gray-100 grid grid-cols-3 gap-1 text-center text-xs">
-                    <div>
-                      <div className="text-gray-400 font-medium text-[10px] uppercase tracking-wider">Budget</div>
-                      <div className="font-semibold text-gray-800 text-xs mt-0.5 truncate">
-                        {formatCurrency(trip.budget, trip.summaryCurrency)}
+                  {hasBudget ? (
+                    <div className="bg-gray-50 rounded-xl p-3 border border-gray-100 grid grid-cols-3 gap-1 text-center text-xs">
+                      <div>
+                        <div className="text-gray-400 font-medium text-[10px] uppercase tracking-wider">Budget</div>
+                        <div className="font-semibold text-gray-800 text-xs mt-0.5 truncate">
+                          {formatCurrency(trip.budget!, baseCurrency)}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-gray-400 font-medium text-[10px] uppercase tracking-wider">Spent</div>
+                        <div className="font-semibold text-gray-800 text-xs mt-0.5 truncate">
+                          {formatCurrency(spent, baseCurrency)}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-gray-400 font-medium text-[10px] uppercase tracking-wider">Remaining</div>
+                        <div
+                          className={`font-bold text-xs mt-0.5 truncate ${
+                            isOverBudget ? 'text-red-600 font-extrabold' : 'text-emerald-600'
+                          }`}
+                        >
+                          {formatCurrency(remaining!, baseCurrency)}
+                        </div>
                       </div>
                     </div>
-                    <div>
-                      <div className="text-gray-400 font-medium text-[10px] uppercase tracking-wider">Spent</div>
-                      <div className="font-semibold text-gray-800 text-xs mt-0.5 truncate">
-                        {formatCurrency(spent, trip.summaryCurrency)}
-                      </div>
+                  ) : (
+                    <div className="bg-gray-50 rounded-xl p-3 border border-gray-100 flex items-center justify-between text-xs">
+                      <span className="text-gray-500 font-medium">Spent:</span>
+                      <span className="font-bold text-gray-900 text-sm">
+                        {formatCurrency(spent, baseCurrency)}
+                      </span>
                     </div>
-                    <div>
-                      <div className="text-gray-400 font-medium text-[10px] uppercase tracking-wider">Remaining</div>
-                      <div
-                        className={`font-bold text-xs mt-0.5 truncate ${
-                          isOverBudget ? 'text-red-600 font-extrabold' : 'text-emerald-600'
-                        }`}
-                      >
-                        {formatCurrency(remaining, trip.summaryCurrency)}
-                      </div>
-                    </div>
-                  </div>
+                  )}
                 </div>
               );
             })}
