@@ -4,11 +4,7 @@ import { Trip, Expense, ExpenseCategory } from '../types';
 import { getTrips, getExpensesForTrip, deleteTrip, deleteExpense, duplicateExpense } from '../lib/storage';
 import { tripSpent, tripRemaining } from '../lib/calculations';
 import { CATEGORIES } from '../lib/currency';
-
-// Module 7 stub for Excel export
-export function exportTripToExcel(trip: Trip, expenses: Expense[]): void {
-  console.log('Stub exportTripToExcel called for trip:', trip.name, 'with expenses:', expenses);
-}
+import { exportTripToExcel } from '../lib/export';
 
 export default function TripDetail() {
   const { tripId } = useParams<{ tripId: string }>();
