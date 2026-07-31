@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Trip, Expense, ExpenseCategory } from '../types';
 import {
   getTrips,
@@ -26,6 +26,8 @@ const CATEGORY_ICONS: Record<ExpenseCategory, string> = {
 
 export default function ExpenseForm() {
   const { tripId, expenseId } = useParams<{ tripId: string; expenseId?: string }>();
+  const [searchParams] = useSearchParams();
+  const duplicateFromId = searchParams.get('duplicateFrom');
   const navigate = useNavigate();
   const isEditMode = Boolean(expenseId);
 
@@ -89,14 +91,28 @@ export default function ExpenseForm() {
       setCurrency(foundTrip.summaryCurrency);
       setExchangeRate('1');
 
-      // Check for saved draft
-      const draft = getDraftExpense();
-      if (draft && draft.tripId === tripId) {
-        setDraftData(draft);
-        setDraftBannerVisible(true);
+      if (duplicateFromId) {
+        const allExpenses = getExpenses();
+        const foundExpense = allExpenses.find((e) => e.id === duplicateFromId);
+        if (foundExpense) {
+          setAmount(foundExpense.amount.toString());
+          setCurrency(foundExpense.currency);
+          setCategory(foundExpense.category);
+          setDescription(foundExpense.description || '');
+          setDate(new Date().toISOString().split('T')[0]);
+          setPeopleCount(foundExpense.peopleCount ? foundExpense.peopleCount.toString() : '1');
+          setExchangeRate(foundExpense.exchangeRate ? foundExpense.exchangeRate.toString() : '1');
+        }
+      } else {
+        // Check for saved draft
+        const draft = getDraftExpense();
+        if (draft && draft.tripId === tripId) {
+          setDraftData(draft);
+          setDraftBannerVisible(true);
+        }
       }
     }
-  }, [tripId, expenseId, isEditMode]);
+  }, [tripId, expenseId, isEditMode, duplicateFromId]);
 
   // Autofocus amount input on mount
   useEffect(() => {
@@ -179,7 +195,7 @@ export default function ExpenseForm() {
       setExchangeRate(rate.toString());
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to fetch rate';
-      setRateError(!navigator.onLine ? '⚠️ Offline — enter rate manually' : '⚠️ Rate fetch failed. Set rate manually.');
+      setRateError(!navigator.onLine ? 'Offline — enter rate manually' : 'Rate fetch failed. Set rate manually.');
       console.warn('Exchange rate fetch warning:', msg);
     } finally {
       setIsFetchingRate(false);

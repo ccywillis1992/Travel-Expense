@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Trip, Expense, ExpenseCategory } from '../types';
-import { getTrips, getExpensesForTrip, deleteTrip, deleteExpense, duplicateExpense } from '../lib/storage';
+import { getTrips, getExpensesForTrip, deleteTrip, deleteExpense } from '../lib/storage';
 import { tripSpent, tripRemaining } from '../lib/calculations';
 import { CATEGORIES } from '../lib/currency';
 import { exportTripToExcel } from '../lib/export';
@@ -84,9 +84,8 @@ export default function TripDetail() {
   };
 
   const handleDuplicateExpense = (expenseId: string) => {
-    const duplicated = duplicateExpense(expenseId);
-    if (duplicated && tripId) {
-      navigate(`/trip/${tripId}/expense/${duplicated.id}/edit`);
+    if (tripId) {
+      navigate(`/trip/${tripId}/expense/new?duplicateFrom=${expenseId}`);
     }
   };
 
