@@ -5,6 +5,7 @@ import { getTrips, getExpensesForTrip, deleteTrip, deleteExpense, duplicateExpen
 import { tripSpent, tripRemaining } from '../lib/calculations';
 import { CATEGORIES } from '../lib/currency';
 import { exportTripToExcel } from '../lib/export';
+import ConfirmModal from '../components/ConfirmModal';
 
 export default function TripDetail() {
   const { tripId } = useParams<{ tripId: string }>();
@@ -18,6 +19,15 @@ export default function TripDetail() {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [sortBy, setSortBy] = useState<'date' | 'amount'>('date');
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
+
+  // Modal confirm state
+  const [confirmModalState, setConfirmModalState] = useState<{
+    isOpen: boolean;
+    type: 'trip' | 'expense';
+    id: string;
+    title: string;
+    message: string;
+  } | null>(null);
 
   useEffect(() => {
     if (tripId) {
@@ -36,19 +46,37 @@ export default function TripDetail() {
     }
   };
 
-  const handleDeleteTrip = () => {
+  const promptDeleteTrip = () => {
     if (!trip) return;
-    const confirmed = window.confirm(`Are you sure you want to delete "${trip.name}" and ALL its expenses? This action cannot be undone.`);
-    if (confirmed) {
-      deleteTrip(trip.id);
-      navigate('/');
-    }
+    setConfirmModalState({
+      isOpen: true,
+      type: 'trip',
+      id: trip.id,
+      title: 'Delete Trip',
+      message: `Are you sure you want to delete "${trip.name}" and ALL its expenses? This action cannot be undone.`,
+    });
   };
 
-  const handleDeleteExpense = (expenseId: string, description: string) => {
-    const confirmed = window.confirm(`Delete expense "${description || 'Untitled'}"?`);
-    if (confirmed) {
-      deleteExpense(expenseId);
+  const promptDeleteExpense = (expenseId: string, description: string) => {
+    setConfirmModalState({
+      isOpen: true,
+      type: 'expense',
+      id: expenseId,
+      title: 'Delete Expense',
+      message: `Delete expense "${description || 'Untitled'}"?`,
+    });
+  };
+
+  const handleConfirmDelete = () => {
+    if (!confirmModalState) return;
+
+    if (confirmModalState.type === 'trip') {
+      deleteTrip(confirmModalState.id);
+      setConfirmModalState(null);
+      navigate('/');
+    } else if (confirmModalState.type === 'expense') {
+      deleteExpense(confirmModalState.id);
+      setConfirmModalState(null);
       if (tripId) {
         setExpenses(getExpensesForTrip(tripId));
       }
@@ -134,7 +162,7 @@ export default function TripDetail() {
           </button>
           <button
             id="btn-delete-trip"
-            onClick={handleDeleteTrip}
+            onClick={promptDeleteTrip}
             className="min-h-[44px] min-w-[44px] text-red-600 hover:text-red-700 font-medium text-base flex items-center justify-center rounded-xl bg-white border border-red-200 shadow-xs active:scale-95 transition"
             title="Delete Trip"
           >
@@ -361,7 +389,7 @@ export default function TripDetail() {
                         </button>
                         <button
                           id={`btn-delete-exp-${exp.id}`}
-                          onClick={() => handleDeleteExpense(exp.id, exp.description)}
+                          onClick={() => promptDeleteExpense(exp.id, exp.description)}
                           className="p-1 text-xs hover:bg-red-50 text-red-600 rounded-md"
                           title="Delete Expense"
                         >
@@ -376,6 +404,20 @@ export default function TripDetail() {
           </div>
         )}
       </div>
+
+      {/* Confirmation Modal */}
+      {confirmModalState && (
+        <ConfirmModal
+          isOpen={confirmModalState.isOpen}
+          title={confirmModalState.title}
+          message={confirmModalState.message}
+          confirmLabel="Delete"
+          cancelLabel="Cancel"
+          isDanger={true}
+          onConfirm={handleConfirmDelete}
+          onCancel={() => setConfirmModalState(null)}
+        />
+      )}
     </div>
   );
 }
