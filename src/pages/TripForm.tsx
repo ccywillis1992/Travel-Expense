@@ -1,7 +1,7 @@
 import { useEffect, useState, FormEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Trip } from '../types';
-import { getTrips, createTrip, updateTrip } from '../lib/storage';
+import { Trip, Expense } from '../types';
+import { getTrips, createTrip, updateTrip, getExpenses } from '../lib/storage';
 import { SUPPORTED_CURRENCIES } from '../lib/currency';
 import { getSettings } from '../lib/settings';
 
@@ -18,9 +18,9 @@ export default function TripForm() {
   const [budget, setBudget] = useState<string>('');
   const [defaultCurrency, setDefaultCurrency] = useState('HKD');
   const [participants, setParticipants] = useState<string[]>(['Me']);
-  const [newParticipantName, setNewParticipantName] = useState('');
 
   const [existingTrip, setExistingTrip] = useState<Trip | null>(null);
+  const [tripExpenses, setTripExpenses] = useState<Expense[]>([]);
 
   // Errors state
   const [errors, setErrors] = useState<{
@@ -46,6 +46,10 @@ export default function TripForm() {
         setParticipants(
           found.participants && found.participants.length > 0 ? found.participants : ['Me']
         );
+
+        // Load trip expenses for participant usage warning check
+        const exps = getExpenses().filter((e) => e.tripId === tripId);
+        setTripExpenses(exps);
       }
     } else {
       setDefaultCurrency(baseCurrency);
@@ -56,26 +60,42 @@ export default function TripForm() {
     startDate && endDate && new Date(endDate) < new Date(startDate)
   );
 
-  const addParticipant = () => {
-    const trimmed = newParticipantName.trim();
-    if (!trimmed) return;
-    if (participants.some((p) => p.toLowerCase() === trimmed.toLowerCase())) {
-      setErrors((prev) => ({ ...prev, participants: 'Participant already exists' }));
-      return;
-    }
-    setParticipants([...participants, trimmed]);
-    setNewParticipantName('');
-    setErrors((prev) => ({ ...prev, participants: undefined }));
+  const handleParticipantChange = (index: number, value: string) => {
+    const updated = [...participants];
+    updated[index] = value;
+    setParticipants(updated);
+    if (errors.participants) setErrors((prev) => ({ ...prev, participants: undefined }));
   };
 
-  const removeParticipant = (nameToRemove: string) => {
+  const addParticipantField = () => {
+    setParticipants([...participants, '']);
+    if (errors.participants) setErrors((prev) => ({ ...prev, participants: undefined }));
+  };
+
+  const removeParticipantField = (index: number) => {
     if (participants.length <= 1) {
       setErrors((prev) => ({ ...prev, participants: 'Trip must have at least 1 participant' }));
       return;
     }
-    setParticipants(participants.filter((p) => p !== nameToRemove));
-    setErrors((prev) => ({ ...prev, participants: undefined }));
+    const updated = participants.filter((_, i) => i !== index);
+    setParticipants(updated);
+    if (errors.participants) setErrors((prev) => ({ ...prev, participants: undefined }));
   };
+
+  // Compute warnings for removed participants used in existing expenses
+  const removedParticipantWarnings = isEditMode && existingTrip
+    ? (existingTrip.participants || ['Me'])
+        .filter((originalP) => !participants.some((p) => p.trim().toLowerCase() === originalP.trim().toLowerCase()))
+        .map((removedP) => {
+          const count = tripExpenses.filter(
+            (e) =>
+              (e.paidBy && e.paidBy.toLowerCase() === removedP.toLowerCase()) ||
+              (e.splitAmong && e.splitAmong.some((s) => s.toLowerCase() === removedP.toLowerCase()))
+          ).length;
+          return { name: removedP, count };
+        })
+        .filter((item) => item.count > 0)
+    : [];
 
   const validate = () => {
     const newErrors: typeof errors = {};
@@ -91,9 +111,21 @@ export default function TripForm() {
     if (isDateRangeInvalid) {
       newErrors.dateRange = 'End date cannot be earlier than start date';
     }
-    if (participants.length === 0) {
+
+    // Validate participants
+    const trimmedParticipants = participants.map((p) => p.trim());
+    if (trimmedParticipants.length === 0) {
       newErrors.participants = 'Trip must have at least 1 participant';
+    } else if (trimmedParticipants.some((p) => p === '')) {
+      newErrors.participants = 'Participant names cannot be blank';
+    } else {
+      const lowerNames = trimmedParticipants.map((p) => p.toLowerCase());
+      const hasDuplicates = new Set(lowerNames).size !== lowerNames.length;
+      if (hasDuplicates) {
+        newErrors.participants = 'Participant names must be unique';
+      }
     }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -103,6 +135,7 @@ export default function TripForm() {
     if (!validate()) return;
 
     const numericBudget = budget.trim() === '' ? null : Number(budget);
+    const cleanedParticipants = participants.map((p) => p.trim());
 
     if (isEditMode && existingTrip) {
       const updated: Trip = {
@@ -113,7 +146,7 @@ export default function TripForm() {
         endDate,
         budget: numericBudget,
         defaultCurrency,
-        participants,
+        participants: cleanedParticipants,
       };
       updateTrip(updated);
       navigate(`/trip/${existingTrip.id}`);
@@ -125,7 +158,7 @@ export default function TripForm() {
         endDate,
         budget: numericBudget,
         defaultCurrency,
-        participants,
+        participants: cleanedParticipants,
       });
       navigate(`/trip/${created.id}`);
     }
@@ -294,55 +327,55 @@ export default function TripForm() {
 
         {/* Trip Participants */}
         <div>
-          <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1">
-            Trip Participants
+          <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-2">
+            Participants <span className="text-red-500">*</span>
           </label>
-          <div className="flex gap-2 mb-2">
-            <input
-              id="input-participant-name"
-              type="text"
-              placeholder="Add name (e.g. Alice)"
-              value={newParticipantName}
-              onChange={(e) => setNewParticipantName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  addParticipant();
-                }
-              }}
-              className="flex-1 min-h-[44px] px-3.5 py-2 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-500"
-            />
-            <button
-              id="btn-add-participant"
-              type="button"
-              onClick={addParticipant}
-              className="min-h-[44px] px-4 bg-gray-100 hover:bg-gray-200 text-gray-800 font-semibold text-xs rounded-xl transition"
-            >
-              ➕ Add
-            </button>
-          </div>
-
-          <div className="flex flex-wrap gap-1.5">
-            {participants.map((person) => (
-              <span
-                key={person}
-                className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 bg-blue-50 text-blue-800 rounded-lg border border-blue-200"
-              >
-                👤 {person}
+          <div className="space-y-2 mb-3">
+            {participants.map((person, index) => (
+              <div key={index} className="flex items-center gap-2">
+                <span className="text-sm">👤</span>
+                <input
+                  id={`participant-input-${index}`}
+                  type="text"
+                  placeholder={`Participant ${index + 1} (e.g. Alice)`}
+                  value={person}
+                  onChange={(e) => handleParticipantChange(index, e.target.value)}
+                  className="flex-1 min-h-[42px] px-3 py-2 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-500"
+                />
                 {participants.length > 1 && (
                   <button
+                    id={`btn-remove-participant-${index}`}
                     type="button"
-                    onClick={() => removeParticipant(person)}
-                    className="hover:text-red-600 ml-0.5 text-xs font-bold"
-                    title={`Remove ${person}`}
+                    onClick={() => removeParticipantField(index)}
+                    className="min-h-[42px] min-w-[42px] px-2 bg-gray-100 hover:bg-red-50 hover:text-red-600 text-gray-600 font-bold text-sm rounded-xl transition flex items-center justify-center border border-gray-200"
+                    title="Remove participant"
                   >
-                    ×
+                    🗑️
                   </button>
                 )}
-              </span>
+              </div>
             ))}
           </div>
-          {errors.participants && <p className="text-xs text-red-600 mt-1">{errors.participants}</p>}
+
+          <button
+            id="btn-add-participant-field"
+            type="button"
+            onClick={addParticipantField}
+            className="w-full min-h-[42px] px-3 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold text-xs rounded-xl border border-blue-200 transition flex items-center justify-center gap-1.5 active:scale-98"
+          >
+            ➕ Add Participant
+          </button>
+
+          {errors.participants && (
+            <p className="text-xs text-red-600 mt-2 font-medium">⚠️ {errors.participants}</p>
+          )}
+
+          {/* Inline warning if removing a participant used in expenses */}
+          {removedParticipantWarnings.map((item) => (
+            <div key={item.name} className="mt-2.5 p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 font-medium">
+              ⚠️ <strong>{item.name}</strong> is used in {item.count} {item.count === 1 ? 'expense' : 'expenses'} — removing them won't change those existing records, but they won't be selectable for new ones.
+            </div>
+          ))}
         </div>
 
         {/* Action Buttons */}

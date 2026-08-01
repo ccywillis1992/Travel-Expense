@@ -7,6 +7,7 @@ import { CATEGORIES, resolveRatesForTrip, ResolvedCurrencyRate } from '../lib/cu
 import { exportTripToExcel } from '../lib/export';
 import { getSettings } from '../lib/settings';
 import ConfirmModal from '../components/ConfirmModal';
+import CategoryPieChart from '../components/CategoryPieChart';
 
 export default function TripDetail() {
   const { tripId } = useParams<{ tripId: string }>();
@@ -335,6 +336,13 @@ export default function TripDetail() {
           ⬇️ Export
         </button>
       </div>
+
+      {/* 4. Category Pie Chart */}
+      <CategoryPieChart
+        expenses={expenses}
+        ratesMap={ratesMap}
+        baseCurrency={baseCurrency}
+      />
 
       {/* 4. Filter & Sort Bar */}
       {expenses.length > 0 && (

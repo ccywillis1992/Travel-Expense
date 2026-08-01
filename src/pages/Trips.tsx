@@ -1,26 +1,46 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Trip, Expense } from '../types';
 import { getTrips, getExpenses, getStorageUsageBytes } from '../lib/storage';
-import { tripSpent, tripRemaining } from '../lib/calculations';
+import { calculateTripSpent } from '../lib/calculations';
 import { getSettings } from '../lib/settings';
+import { resolveRatesForTrip, ResolvedCurrencyRate } from '../lib/currency';
 
 export default function Trips() {
   const navigate = useNavigate();
   const [trips, setTrips] = useState<Trip[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [storageBytes, setStorageBytes] = useState<number>(0);
+  const [ratesInfo, setRatesInfo] = useState<Record<string, ResolvedCurrencyRate>>({});
   const baseCurrency = getSettings().baseCurrency;
+
+  const loadData = useCallback(async () => {
+    const loadedTrips = getTrips();
+    const loadedExpenses = getExpenses();
+    setTrips(loadedTrips);
+    setExpenses(loadedExpenses);
+    setStorageBytes(getStorageUsageBytes());
+
+    // Collect all currencies in use across all trips and user base currency
+    const allCurrencies = Array.from(
+      new Set([
+        baseCurrency,
+        ...loadedTrips.map((t) => t.defaultCurrency || t.summaryCurrency || 'HKD'),
+        ...loadedExpenses.map((e) => e.currency),
+      ])
+    );
+
+    try {
+      const info = await resolveRatesForTrip(baseCurrency, allCurrencies);
+      setRatesInfo(info);
+    } catch (err) {
+      console.warn('Failed to resolve exchange rates on Trips page:', err);
+    }
+  }, [baseCurrency]);
 
   useEffect(() => {
     loadData();
-  }, []);
-
-  const loadData = () => {
-    setTrips(getTrips());
-    setExpenses(getExpenses());
-    setStorageBytes(getStorageUsageBytes());
-  };
+  }, [loadData]);
 
   const formatStorageSize = (bytes: number): string => {
     if (bytes < 1024) return `${bytes} B`;
@@ -87,9 +107,15 @@ export default function Trips() {
         ) : (
           <div className="space-y-3">
             {trips.map((trip) => {
-              const spent = tripSpent(trip, expenses);
-              const remaining = tripRemaining(trip, expenses);
+              const ratesMap: Record<string, number | null> = {};
+              (Object.entries(ratesInfo) as [string, ResolvedCurrencyRate][]).forEach(([curr, info]) => {
+                ratesMap[curr] = info.rate;
+              });
+
+              const spentSummary = calculateTripSpent(trip, expenses, ratesMap, baseCurrency);
+              const spent = spentSummary.baseSpent;
               const hasBudget = trip.budget !== null && trip.budget !== undefined;
+              const remaining = hasBudget ? trip.budget! - spent : null;
               const isOverBudget = hasBudget && remaining! < 0;
 
               return (

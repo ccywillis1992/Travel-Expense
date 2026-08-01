@@ -35,8 +35,104 @@ function safeRemoveItem(key: string): void {
   }
 }
 
-export function getTrips(): Trip[] {
+export function seedDefaultDataIfEmpty(): void {
   const data = safeGetItem(TRIPS_KEY);
+  if (!data) {
+    const defaultTripId = 'trip_demo_japan_2026';
+    const sampleTrips: Trip[] = [
+      {
+        id: defaultTripId,
+        name: 'Tokyo & Kyoto 2026',
+        destination: 'Japan',
+        startDate: '2026-04-01',
+        endDate: '2026-04-10',
+        budget: 15000,
+        defaultCurrency: 'JPY',
+        summaryCurrency: 'JPY',
+        participants: ['Me', 'Alex', 'Sam'],
+        created: new Date().toISOString(),
+      },
+    ];
+
+    const sampleExpenses: Expense[] = [
+      {
+        id: 'exp_demo_1',
+        tripId: defaultTripId,
+        date: '2026-04-02',
+        description: 'Ichiran Ramen & Gyoza',
+        category: 'Food',
+        amount: 3200,
+        currency: 'JPY',
+        paidBy: 'Me',
+        splitAmong: ['Me', 'Alex', 'Sam'],
+        created: new Date().toISOString(),
+        modified: new Date().toISOString(),
+      },
+      {
+        id: 'exp_demo_2',
+        tripId: defaultTripId,
+        date: '2026-04-03',
+        description: 'Shinkansen Bullet Train to Kyoto',
+        category: 'Transport',
+        amount: 28000,
+        currency: 'JPY',
+        paidBy: 'Alex',
+        splitAmong: ['Me', 'Alex', 'Sam'],
+        created: new Date().toISOString(),
+        modified: new Date().toISOString(),
+      },
+      {
+        id: 'exp_demo_3',
+        tripId: defaultTripId,
+        date: '2026-04-01',
+        description: 'Shinjuku Granbell Hotel',
+        category: 'Accommodation',
+        amount: 54000,
+        currency: 'JPY',
+        paidBy: 'Me',
+        splitAmong: ['Me', 'Alex', 'Sam'],
+        created: new Date().toISOString(),
+        modified: new Date().toISOString(),
+      },
+      {
+        id: 'exp_demo_4',
+        tripId: defaultTripId,
+        date: '2026-04-04',
+        description: 'Don Quijote Souvenirs',
+        category: 'Shopping',
+        amount: 12500,
+        currency: 'JPY',
+        paidBy: 'Sam',
+        splitAmong: ['Me', 'Alex', 'Sam'],
+        created: new Date().toISOString(),
+        modified: new Date().toISOString(),
+      },
+      {
+        id: 'exp_demo_5',
+        tripId: defaultTripId,
+        date: '2026-04-05',
+        description: 'Ghibli Museum & Shrines',
+        category: 'Attraction',
+        amount: 6000,
+        currency: 'JPY',
+        paidBy: 'Me',
+        splitAmong: ['Me', 'Alex', 'Sam'],
+        created: new Date().toISOString(),
+        modified: new Date().toISOString(),
+      },
+    ];
+
+    saveTrips(sampleTrips);
+    saveExpenses(sampleExpenses);
+  }
+}
+
+export function getTrips(): Trip[] {
+  let data = safeGetItem(TRIPS_KEY);
+  if (!data) {
+    seedDefaultDataIfEmpty();
+    data = safeGetItem(TRIPS_KEY);
+  }
   if (!data) return [];
   try {
     const parsed = JSON.parse(data);

@@ -24,7 +24,8 @@ export function calculateTripSpent(
   baseCurrency?: string
 ): TripSpentSummary {
   const tripExpenses = expenses.filter((e) => e.tripId === trip.id);
-  const defaultCurr = trip.defaultCurrency || trip.summaryCurrency || 'HKD';
+  const defaultCurr = (trip.defaultCurrency || trip.summaryCurrency || 'HKD').trim().toUpperCase();
+  const cleanBase = baseCurrency ? baseCurrency.trim().toUpperCase() : '';
 
   let rawDefaultSpent = 0;
   let baseSpent = 0;
@@ -32,15 +33,16 @@ export function calculateTripSpent(
   let missingRatesCount = 0;
 
   for (const e of tripExpenses) {
-    if (e.currency === defaultCurr) {
+    const expCurr = (e.currency || '').trim().toUpperCase();
+    if (expCurr === defaultCurr) {
       rawDefaultSpent += e.amount;
     } else {
       otherCurrenciesCount += 1;
     }
 
-    // Rate resolution: if e.currency === baseCurrency, rate is 1. Else lookup in ratesMap.
-    let rate: number | null | undefined = ratesMap[e.currency];
-    if (baseCurrency && e.currency === baseCurrency) {
+    // Rate resolution: if expCurr === cleanBase, rate is 1. Else lookup in ratesMap.
+    let rate: number | null | undefined = ratesMap[expCurr] ?? ratesMap[e.currency];
+    if (cleanBase && expCurr === cleanBase) {
       rate = 1;
     }
 
