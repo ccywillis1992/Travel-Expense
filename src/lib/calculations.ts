@@ -89,79 +89,167 @@ export interface SettlementTransaction {
   amount: number;
 }
 
-export function calculateBalances(
+export interface ParticipantBalanceDetails {
+  totalPaid: number;
+  totalOwed: number;
+  balance: number;
+}
+
+export interface TripBalancesSummary {
+  participants: string[];
+  details: Record<string, ParticipantBalanceDetails>;
+  balances: Record<string, number>;
+  settlements: SettlementTransaction[];
+}
+
+export function calculateParticipantBalances(
+  trip: Trip,
   expenses: Expense[],
-  participants: string[],
-  ratesMap: Record<string, number | null> = {}
-): { balances: Record<string, number>; settlements: SettlementTransaction[] } {
+  ratesMap: Record<string, number | null> = {},
+  baseCurrency?: string
+): TripBalancesSummary {
+  const tripExpenses = expenses.filter((e) => e.tripId === trip.id);
+
+  // Collect all unique participant names from trip definition and expenses
+  const participantSet = new Set<string>(
+    trip.participants && trip.participants.length > 0 ? trip.participants : ['Me']
+  );
+
+  tripExpenses.forEach((exp) => {
+    if (exp.paidBy) participantSet.add(exp.paidBy);
+    if (exp.splitAmong) exp.splitAmong.forEach((p) => participantSet.add(p));
+  });
+
+  const participants = Array.from(participantSet);
+
+  const details: Record<string, ParticipantBalanceDetails> = {};
   const balances: Record<string, number> = {};
+
   participants.forEach((p) => {
+    details[p] = { totalPaid: 0, totalOwed: 0, balance: 0 };
     balances[p] = 0;
   });
 
-  expenses.forEach((exp) => {
-    const rate = ratesMap[exp.currency];
-    if (typeof rate !== 'number' || isNaN(rate)) return; // skip if rate unavailable
+  const cleanBase = baseCurrency ? baseCurrency.trim().toUpperCase() : '';
 
-    const convertedAmount = exp.amount * rate;
-    const payer = exp.paidBy || (participants[0] || 'Me');
-    const splitList = exp.splitAmong && exp.splitAmong.length > 0 ? exp.splitAmong : participants;
-    const share = convertedAmount / splitList.length;
+  tripExpenses.forEach((exp) => {
+    const expCurr = (exp.currency || '').trim().toUpperCase();
+    let rate: number | null | undefined;
 
-    if (balances[payer] !== undefined) {
-      balances[payer] += convertedAmount;
+    if (cleanBase && expCurr === cleanBase) {
+      rate = 1;
     } else {
-      balances[payer] = convertedAmount;
+      rate = ratesMap[expCurr] ?? ratesMap[exp.currency];
     }
 
+    const convertedAmount =
+      typeof rate === 'number' && !isNaN(rate) ? exp.amount * rate : exp.amount;
+
+    const payer = exp.paidBy || participants[0] || 'Me';
+    const splitList =
+      exp.splitAmong && exp.splitAmong.length > 0 ? exp.splitAmong : participants;
+    const share = convertedAmount / splitList.length;
+
+    // Credit payer
+    if (!details[payer]) {
+      details[payer] = { totalPaid: 0, totalOwed: 0, balance: 0 };
+    }
+    details[payer].totalPaid += convertedAmount;
+
+    // Debit split participants
     splitList.forEach((person) => {
-      if (balances[person] !== undefined) {
-        balances[person] -= share;
-      } else {
-        balances[person] = -share;
+      if (!details[person]) {
+        details[person] = { totalPaid: 0, totalOwed: 0, balance: 0 };
       }
+      details[person].totalOwed += share;
     });
   });
 
-  // Calculate minimal settlements
+  // Calculate net balances
+  participants.forEach((p) => {
+    const d = details[p];
+    d.totalPaid = Math.round(d.totalPaid * 100) / 100;
+    d.totalOwed = Math.round(d.totalOwed * 100) / 100;
+    d.balance = Math.round((d.totalPaid - d.totalOwed) * 100) / 100;
+    balances[p] = d.balance;
+  });
+
+  const settlements = simplifyDebts(balances);
+
+  return {
+    participants,
+    details,
+    balances,
+    settlements,
+  };
+}
+
+export function simplifyDebts(balances: Record<string, number>): SettlementTransaction[] {
   const creditors: { name: string; amount: number }[] = [];
   const debtors: { name: string; amount: number }[] = [];
 
   Object.entries(balances).forEach(([name, bal]) => {
     const rounded = Math.round(bal * 100) / 100;
-    if (rounded > 0.01) {
+    if (rounded > 0.009) {
       creditors.push({ name, amount: rounded });
-    } else if (rounded < -0.01) {
-      debtors.push({ name, amount: -rounded });
+    } else if (rounded < -0.009) {
+      debtors.push({ name, amount: Math.abs(rounded) });
     }
   });
 
-  creditors.sort((a, b) => b.amount - a.amount);
-  debtors.sort((a, b) => b.amount - a.amount);
-
   const settlements: SettlementTransaction[] = [];
-  let i = 0;
-  let j = 0;
 
-  while (i < debtors.length && j < creditors.length) {
-    const debtor = debtors[i];
-    const creditor = creditors[j];
-    const amount = Math.min(debtor.amount, creditor.amount);
+  while (creditors.length > 0 && debtors.length > 0) {
+    creditors.sort((a, b) => b.amount - a.amount);
+    debtors.sort((a, b) => b.amount - a.amount);
 
-    if (amount > 0.01) {
+    const creditor = creditors[0];
+    const debtor = debtors[0];
+
+    const amount = Math.min(creditor.amount, debtor.amount);
+    const roundedAmount = Math.round(amount * 100) / 100;
+
+    if (roundedAmount >= 0.01) {
       settlements.push({
         from: debtor.name,
         to: creditor.name,
-        amount: Math.round(amount * 100) / 100,
+        amount: roundedAmount,
       });
     }
 
-    debtor.amount -= amount;
     creditor.amount -= amount;
+    debtor.amount -= amount;
 
-    if (debtor.amount < 0.01) i++;
-    if (creditor.amount < 0.01) j++;
+    if (creditor.amount < 0.009) {
+      creditors.shift();
+    }
+    if (debtor.amount < 0.009) {
+      debtors.shift();
+    }
   }
 
-  return { balances, settlements };
+  return settlements;
+}
+
+export function calculateBalances(
+  expenses: Expense[],
+  participants: string[],
+  ratesMap: Record<string, number | null> = {}
+): { balances: Record<string, number>; settlements: SettlementTransaction[] } {
+  const dummyTrip: Trip = {
+    id: 'temp',
+    name: 'Temp',
+    destination: '',
+    startDate: '',
+    endDate: '',
+    budget: null,
+    defaultCurrency: 'HKD',
+    participants,
+    created: '',
+  };
+  const result = calculateParticipantBalances(dummyTrip, expenses, ratesMap);
+  return {
+    balances: result.balances,
+    settlements: result.settlements,
+  };
 }

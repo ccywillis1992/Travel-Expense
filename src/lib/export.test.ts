@@ -69,5 +69,14 @@ describe('exportTripToExcel / buildTripWorkbook', () => {
     expect(jsonRows[1]).toEqual(['Trip Name', 'Euro Trip 2026']);
     expect(jsonRows[2]).toEqual(['Destination', 'Paris & Rome']);
     expect(jsonRows[3]).toEqual(['Dates', '2026-06-01 to 2026-06-15']);
+
+    // Verify Sheet 2: Balances
+    expect(workbook.SheetNames).toHaveLength(2);
+    expect(workbook.SheetNames[1]).toBe('Balances');
+
+    const balancesWorksheet = workbook.Sheets['Balances'];
+    const balancesJsonRows = XLSX.utils.sheet_to_json<(string | number)[]>(balancesWorksheet, { header: 1 });
+    expect(balancesJsonRows[0][0]).toBe('PARTICIPANT BALANCES SUMMARY');
+    expect(balancesJsonRows.some((row) => row && row[0] === 'SETTLEMENT TRANSACTIONS')).toBe(true);
   });
 });

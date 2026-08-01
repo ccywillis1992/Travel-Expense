@@ -4,6 +4,7 @@ import Trips from './pages/Trips';
 import TripDetail from './pages/TripDetail';
 import TripForm from './pages/TripForm';
 import ExpenseForm from './pages/ExpenseForm';
+import SettleUp from './pages/SettleUp';
 import Settings from './pages/Settings';
 
 export default function App() {
@@ -15,6 +16,7 @@ export default function App() {
           <Route path="/settings" element={<Settings />} />
           <Route path="/trip/new" element={<TripForm />} />
           <Route path="/trip/:tripId" element={<TripDetail />} />
+          <Route path="/trip/:tripId/settle" element={<SettleUp />} />
           <Route path="/trip/:tripId/edit" element={<TripForm />} />
           <Route path="/trip/:tripId/expense/new" element={<ExpenseForm />} />
           <Route path="/trip/:tripId/expense/:expenseId/edit" element={<ExpenseForm />} />

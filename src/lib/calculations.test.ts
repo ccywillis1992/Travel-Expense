@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { splitAmount, tripSpent, tripRemaining, calculateTripSpent } from './calculations';
+import {
+  splitAmount,
+  tripSpent,
+  tripRemaining,
+  calculateTripSpent,
+  calculateParticipantBalances,
+  simplifyDebts,
+} from './calculations';
 import { Trip, Expense } from '../types';
 
 describe('calculations', () => {
@@ -81,4 +88,129 @@ describe('calculations', () => {
       expect(summary.otherCurrenciesCount).toBe(1); // JPY is not USD
     });
   });
+
+  describe('settle-up and debt simplification', () => {
+    const baseTrip: Trip = {
+      id: 'trip-settle',
+      name: 'Group Trip',
+      destination: 'Paris',
+      startDate: '2026-06-01',
+      endDate: '2026-06-07',
+      budget: null,
+      defaultCurrency: 'USD',
+      participants: ['Alice', 'Bob', 'Charlie'],
+      created: '2026-05-01T00:00:00.000Z',
+    };
+
+    it('calculates balances and settlements for an even 3-way split with one payer', () => {
+      const expenses: Expense[] = [
+        {
+          id: 'e1',
+          tripId: 'trip-settle',
+          date: '2026-06-01',
+          description: 'Dinner',
+          category: 'Food',
+          amount: 90,
+          currency: 'USD',
+          paidBy: 'Alice',
+          splitAmong: ['Alice', 'Bob', 'Charlie'],
+          created: '2026-06-01T00:00:00.000Z',
+          modified: '2026-06-01T00:00:00.000Z',
+        },
+      ];
+
+      const result = calculateParticipantBalances(baseTrip, expenses, { USD: 1 }, 'USD');
+
+      expect(result.details.Alice).toEqual({ totalPaid: 90, totalOwed: 30, balance: 60 });
+      expect(result.details.Bob).toEqual({ totalPaid: 0, totalOwed: 30, balance: -30 });
+      expect(result.details.Charlie).toEqual({ totalPaid: 0, totalOwed: 30, balance: -30 });
+
+      expect(result.settlements).toHaveLength(2);
+      expect(result.settlements).toContainEqual({ from: 'Bob', to: 'Alice', amount: 30 });
+      expect(result.settlements).toContainEqual({ from: 'Charlie', to: 'Alice', amount: 30 });
+    });
+
+    it('handles an uneven split where someone is excluded from some expenses', () => {
+      const expenses: Expense[] = [
+        {
+          id: 'e1',
+          tripId: 'trip-settle',
+          date: '2026-06-01',
+          description: 'Dinner',
+          category: 'Food',
+          amount: 90,
+          currency: 'USD',
+          paidBy: 'Alice',
+          splitAmong: ['Alice', 'Bob', 'Charlie'],
+          created: '2026-06-01T00:00:00.000Z',
+          modified: '2026-06-01T00:00:00.000Z',
+        },
+        {
+          id: 'e2',
+          tripId: 'trip-settle',
+          date: '2026-06-02',
+          description: 'Taxi for Bob & Charlie',
+          category: 'Transport',
+          amount: 60,
+          currency: 'USD',
+          paidBy: 'Bob',
+          splitAmong: ['Bob', 'Charlie'],
+          created: '2026-06-02T00:00:00.000Z',
+          modified: '2026-06-02T00:00:00.000Z',
+        },
+      ];
+
+      const result = calculateParticipantBalances(baseTrip, expenses, { USD: 1 }, 'USD');
+
+      expect(result.details.Alice).toEqual({ totalPaid: 90, totalOwed: 30, balance: 60 });
+      expect(result.details.Bob).toEqual({ totalPaid: 60, totalOwed: 60, balance: 0 });
+      expect(result.details.Charlie).toEqual({ totalPaid: 0, totalOwed: 60, balance: -60 });
+
+      expect(result.settlements).toEqual([
+        { from: 'Charlie', to: 'Alice', amount: 60 },
+      ]);
+    });
+
+    it('returns zero transactions for an already-settled trip', () => {
+      const expenses: Expense[] = [
+        {
+          id: 'e1',
+          tripId: 'trip-settle',
+          date: '2026-06-01',
+          description: 'Lunch',
+          category: 'Food',
+          amount: 50,
+          currency: 'USD',
+          paidBy: 'Alice',
+          splitAmong: ['Alice', 'Bob'],
+          created: '2026-06-01T00:00:00.000Z',
+          modified: '2026-06-01T00:00:00.000Z',
+        },
+        {
+          id: 'e2',
+          tripId: 'trip-settle',
+          date: '2026-06-02',
+          description: 'Museum',
+          category: 'Attraction',
+          amount: 50,
+          currency: 'USD',
+          paidBy: 'Bob',
+          splitAmong: ['Alice', 'Bob'],
+          created: '2026-06-02T00:00:00.000Z',
+          modified: '2026-06-02T00:00:00.000Z',
+        },
+      ];
+
+      const twoPersonTrip: Trip = { ...baseTrip, participants: ['Alice', 'Bob'] };
+      const result = calculateParticipantBalances(twoPersonTrip, expenses, { USD: 1 }, 'USD');
+
+      expect(result.details.Alice.balance).toBe(0);
+      expect(result.details.Bob.balance).toBe(0);
+      expect(result.settlements).toEqual([]);
+
+      // Also directly test simplifyDebts with 0 balances
+      expect(simplifyDebts({ Alice: 0, Bob: 0, Charlie: 0 })).toEqual([]);
+    });
+  });
 });
+

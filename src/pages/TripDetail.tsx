@@ -318,7 +318,7 @@ export default function TripDetail() {
         </div>
       </div>
 
-      {/* 3. Actions Row: Add Expense & Export */}
+      {/* 3. Actions Row: Add Expense, Settle Up & Export */}
       <div className="flex gap-2 mb-5">
         <button
           id="btn-add-expense"
@@ -328,9 +328,17 @@ export default function TripDetail() {
           ➕ Add Expense
         </button>
         <button
+          id="btn-settle-up"
+          onClick={() => navigate(`/trip/${trip.id}/settle`)}
+          className="min-h-[48px] px-3.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 font-semibold rounded-xl text-sm shadow-xs active:scale-95 transition flex items-center justify-center gap-1"
+          title="Settle Up Balances"
+        >
+          ⚖️ Settle Up
+        </button>
+        <button
           id="btn-export-excel"
           onClick={() => exportTripToExcel(trip, expenses, ratesMap)}
-          className="min-h-[48px] px-4 bg-white border border-gray-200 hover:bg-gray-50 text-gray-800 font-medium rounded-xl text-sm shadow-xs active:scale-95 transition flex items-center justify-center gap-1"
+          className="min-h-[48px] px-3.5 bg-white border border-gray-200 hover:bg-gray-50 text-gray-800 font-medium rounded-xl text-sm shadow-xs active:scale-95 transition flex items-center justify-center gap-1"
           title="Export to Excel"
         >
           ⬇️ Export

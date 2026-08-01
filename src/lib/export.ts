@@ -1,6 +1,6 @@
 import * as XLSX from 'xlsx';
 import { Trip, Expense } from '../types';
-import { calculateTripSpent, personSplitAmount } from './calculations';
+import { calculateTripSpent, personSplitAmount, calculateParticipantBalances } from './calculations';
 import { fetchRatesForCurrencies, getRateCache } from './currency';
 import { getSettings } from './settings';
 
@@ -59,7 +59,7 @@ export async function buildTripWorkbook(
   // Sort expenses ascending by date
   const sortedExpenses = [...expenses].sort((a, b) => a.date.localeCompare(b.date));
 
-  // Build rows array for SheetJS
+  // Build rows array for Sheet 1 (Expenses)
   const sheetData: (string | number)[][] = [];
 
   // 1. Summary Block
@@ -108,11 +108,11 @@ export async function buildTripWorkbook(
     ]);
   });
 
-  // Create workbook and worksheet
-  const worksheet = XLSX.utils.aoa_to_sheet(sheetData);
+  // Create workbook and worksheet 1
+  const worksheet1 = XLSX.utils.aoa_to_sheet(sheetData);
 
   // Set column widths for clean presentation
-  worksheet['!cols'] = [
+  worksheet1['!cols'] = [
     { wch: 12 }, // Date
     { wch: 25 }, // Description
     { wch: 15 }, // Category
@@ -125,9 +125,58 @@ export async function buildTripWorkbook(
     { wch: 20 }, // Split Amount
   ];
 
+  // Build Sheet 2: "Balances"
+  const balancesSummary = calculateParticipantBalances(trip, expenses, ratesMap, baseCurrency);
+  const balanceSheetData: (string | number)[][] = [];
+
+  balanceSheetData.push(['PARTICIPANT BALANCES SUMMARY']);
+  balanceSheetData.push([
+    'Participant',
+    `Total Paid (${baseCurrency})`,
+    `Total Owed / Fair Share (${baseCurrency})`,
+    `Net Balance (${baseCurrency})`,
+    'Status',
+  ]);
+
+  balancesSummary.participants.forEach((person) => {
+    const detail = balancesSummary.details[person] || { totalPaid: 0, totalOwed: 0, balance: 0 };
+    const status =
+      detail.balance > 0.009 ? 'Is Owed' : detail.balance < -0.009 ? 'Owes' : 'Settled';
+
+    balanceSheetData.push([
+      person,
+      detail.totalPaid,
+      detail.totalOwed,
+      detail.balance,
+      status,
+    ]);
+  });
+
+  balanceSheetData.push([]); // Blank row
+  balanceSheetData.push(['SETTLEMENT TRANSACTIONS']);
+  balanceSheetData.push(['From (Debtor)', 'To (Creditor)', `Amount (${baseCurrency})`]);
+
+  if (balancesSummary.settlements.length > 0) {
+    balancesSummary.settlements.forEach((tx) => {
+      balanceSheetData.push([tx.from, tx.to, tx.amount]);
+    });
+  } else {
+    balanceSheetData.push(['All settled up 🎉', '', '']);
+  }
+
+  const worksheet2 = XLSX.utils.aoa_to_sheet(balanceSheetData);
+  worksheet2['!cols'] = [
+    { wch: 20 }, // Participant / From
+    { wch: 20 }, // Total Paid / To
+    { wch: 25 }, // Total Owed / Amount
+    { wch: 20 }, // Net Balance
+    { wch: 15 }, // Status
+  ];
+
   const workbook = XLSX.utils.book_new();
-  const sheetName = sanitizeSheetName(trip.name);
-  XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
+  const mainSheetName = sanitizeSheetName(trip.name);
+  XLSX.utils.book_append_sheet(workbook, worksheet1, mainSheetName);
+  XLSX.utils.book_append_sheet(workbook, worksheet2, 'Balances');
 
   const fileName = sanitizeFileName(trip.name);
   return { workbook, fileName };
@@ -141,3 +190,4 @@ export async function exportTripToExcel(
   const { workbook, fileName } = await buildTripWorkbook(trip, expenses, passedRatesMap);
   XLSX.writeFile(workbook, fileName);
 }
+
