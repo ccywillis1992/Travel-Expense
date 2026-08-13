@@ -250,8 +250,8 @@ export default function TripForm() {
         </div>
 
         {/* Dates Row */}
-        <div className="grid grid-cols-2 gap-3">
-          <div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+          <div className="min-w-0">
             <label htmlFor="trip-start-date" className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1">
               Start Date
             </label>
@@ -260,10 +260,10 @@ export default function TripForm() {
               type="date"
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
-              className="w-full min-h-[44px] px-3 py-2 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-500"
+              className="w-full min-h-[44px] px-3 py-2 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-500 min-w-0 bg-white"
             />
           </div>
-          <div>
+          <div className="min-w-0">
             <label htmlFor="trip-end-date" className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1">
               End Date
             </label>
@@ -272,19 +272,19 @@ export default function TripForm() {
               type="date"
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
-              className={`w-full min-h-[44px] px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 ${
+              className={`w-full min-h-[44px] px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 min-w-0 bg-white ${
                 isDateRangeInvalid ? 'border-red-500 focus:ring-red-200' : 'border-gray-300 focus:ring-blue-200 focus:border-blue-500'
               }`}
             />
           </div>
         </div>
         {isDateRangeInvalid && (
-          <p className="text-xs text-red-600 mt-0.5">⚠️ End date cannot be before start date.</p>
+          <p className="text-xs text-red-600 mt-0.5 font-medium">⚠️ End date cannot be before start date.</p>
         )}
 
         {/* Budget & Default Currency Row */}
-        <div className="grid grid-cols-3 gap-3">
-          <div className="col-span-2">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+          <div className="sm:col-span-2 min-w-0">
             <label htmlFor="trip-budget" className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1">
               Budget ({baseCurrency}) <span className="text-gray-400 font-normal lowercase">(optional)</span>
             </label>
@@ -299,14 +299,14 @@ export default function TripForm() {
                 setBudget(e.target.value);
                 if (errors.budget) setErrors((prev) => ({ ...prev, budget: undefined }));
               }}
-              className={`w-full min-h-[44px] px-3.5 py-2 border rounded-xl text-base focus:outline-none focus:ring-2 ${
+              className={`w-full min-h-[44px] px-3.5 py-2 border rounded-xl text-base focus:outline-none focus:ring-2 min-w-0 bg-white ${
                 errors.budget ? 'border-red-500 focus:ring-red-200' : 'border-gray-300 focus:ring-blue-200 focus:border-blue-500'
               }`}
             />
-            {errors.budget && <p className="text-xs text-red-600 mt-1">{errors.budget}</p>}
+            {errors.budget && <p className="text-xs text-red-600 mt-1 font-medium">{errors.budget}</p>}
           </div>
 
-          <div>
+          <div className="min-w-0">
             <label htmlFor="trip-currency" className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-1">
               Default Currency
             </label>
@@ -314,7 +314,7 @@ export default function TripForm() {
               id="trip-currency"
               value={defaultCurrency}
               onChange={(e) => setDefaultCurrency(e.target.value)}
-              className="w-full min-h-[44px] px-2.5 py-2 border border-gray-300 rounded-xl text-base bg-white font-medium focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-500"
+              className="w-full min-h-[44px] px-2.5 py-2 border border-gray-300 rounded-xl text-base bg-white font-medium focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-500 min-w-0"
             >
               {SUPPORTED_CURRENCIES.map((curr) => (
                 <option key={curr} value={curr}>

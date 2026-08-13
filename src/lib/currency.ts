@@ -113,12 +113,23 @@ export function getRateCache(): Record<string, RateCacheEntry> {
   }
 }
 
-export function saveRateCacheEntry(currency: string, rate: number, fetchedAt?: string): void {
+export function saveRateCacheEntry(currency: string, targetCurrencyOrRate: string | number, rateOrFetchedAt?: number | string, fetchedAt?: string): void {
   try {
     if (typeof window === 'undefined' || !window.localStorage) return;
     const cache = getRateCache();
-    const dateStr = fetchedAt || new Date().toISOString().split('T')[0];
-    cache[currency.toUpperCase()] = { rate, fetchedAt: dateStr };
+    const dateStr = (typeof rateOrFetchedAt === 'string' ? rateOrFetchedAt : fetchedAt) || new Date().toISOString().split('T')[0];
+    
+    if (typeof targetCurrencyOrRate === 'string') {
+      const targetCurrency = targetCurrencyOrRate;
+      const rate = typeof rateOrFetchedAt === 'number' ? rateOrFetchedAt : 1;
+      const key = `${currency.trim().toUpperCase()}_${targetCurrency.trim().toUpperCase()}`;
+      cache[key] = { rate, fetchedAt: dateStr };
+      // Also write legacy key if target is default
+      cache[currency.trim().toUpperCase()] = { rate, fetchedAt: dateStr };
+    } else {
+      const rate = targetCurrencyOrRate;
+      cache[currency.trim().toUpperCase()] = { rate, fetchedAt: dateStr };
+    }
     localStorage.setItem('rate_cache', JSON.stringify(cache));
   } catch (err) {
     console.warn('Failed to save rate_cache:', err);
@@ -126,18 +137,18 @@ export function saveRateCacheEntry(currency: string, rate: number, fetchedAt?: s
 }
 
 export async function fetchRatesForCurrencies(
-  baseCurrency: string,
+  targetCurrency: string,
   currencies: string[]
 ): Promise<Record<string, number>> {
-  const cleanBase = baseCurrency.trim().toUpperCase();
+  const cleanTarget = targetCurrency.trim().toUpperCase();
   const distinct = Array.from(new Set(currencies.map((c) => c.trim().toUpperCase())));
 
   const results: Record<string, number> = {};
   const promises = distinct.map(async (curr) => {
-    if (curr === cleanBase) {
+    if (curr === cleanTarget) {
       return { curr, rate: 1 };
     }
-    const rate = await fetchExchangeRate(curr, cleanBase);
+    const rate = await fetchExchangeRate(curr, cleanTarget);
     return { curr, rate };
   });
 
@@ -159,15 +170,15 @@ export interface ResolvedCurrencyRate {
 }
 
 export async function resolveRatesForTrip(
-  baseCurrency: string,
+  targetCurrency: string,
   currencies: string[]
 ): Promise<Record<string, ResolvedCurrencyRate>> {
-  const cleanBase = baseCurrency.trim().toUpperCase();
+  const cleanTarget = targetCurrency.trim().toUpperCase();
   const distinct = Array.from(new Set(currencies.map((c) => c.trim().toUpperCase())));
 
   let liveRates: Record<string, number> = {};
   try {
-    liveRates = await fetchRatesForCurrencies(cleanBase, distinct);
+    liveRates = await fetchRatesForCurrencies(cleanTarget, distinct);
   } catch (err) {
     console.warn('Failed to fetch live rates:', err);
   }
@@ -176,7 +187,7 @@ export async function resolveRatesForTrip(
   const result: Record<string, ResolvedCurrencyRate> = {};
 
   for (const curr of distinct) {
-    if (curr === cleanBase) {
+    if (curr === cleanTarget) {
       result[curr] = { currency: curr, rate: 1, status: 'live' };
       continue;
     }
@@ -184,21 +195,31 @@ export async function resolveRatesForTrip(
     if (typeof liveRates[curr] === 'number') {
       const rate = liveRates[curr];
       const todayStr = new Date().toISOString().split('T')[0];
-      saveRateCacheEntry(curr, rate, todayStr);
+      saveRateCacheEntry(curr, cleanTarget, rate, todayStr);
       result[curr] = { currency: curr, rate, status: 'live', fetchedAt: todayStr };
-    } else if (cache[curr] && typeof cache[curr].rate === 'number') {
-      result[curr] = {
-        currency: curr,
-        rate: cache[curr].rate,
-        status: 'cached',
-        fetchedAt: cache[curr].fetchedAt,
-      };
     } else {
-      result[curr] = {
-        currency: curr,
-        rate: null,
-        status: 'unavailable',
-      };
+      const pairKey = `${curr}_${cleanTarget}`;
+      if (cache[pairKey] && typeof cache[pairKey].rate === 'number') {
+        result[curr] = {
+          currency: curr,
+          rate: cache[pairKey].rate,
+          status: 'cached',
+          fetchedAt: cache[pairKey].fetchedAt,
+        };
+      } else if (cache[curr] && typeof cache[curr].rate === 'number' && cleanTarget === 'HKD') {
+        result[curr] = {
+          currency: curr,
+          rate: cache[curr].rate,
+          status: 'cached',
+          fetchedAt: cache[curr].fetchedAt,
+        };
+      } else {
+        result[curr] = {
+          currency: curr,
+          rate: null,
+          status: 'unavailable',
+        };
+      }
     }
   }
 

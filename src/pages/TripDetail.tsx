@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Trip, Expense } from '../types';
-import { getTrips, getExpensesForTrip, deleteTrip, deleteExpense } from '../lib/storage';
+import { getTrips, getExpensesForTrip, deleteTrip, deleteExpense, updateTrip } from '../lib/storage';
 import { calculateTripSpent, personSplitAmount } from '../lib/calculations';
 import { CATEGORIES, resolveRatesForTrip, ResolvedCurrencyRate } from '../lib/currency';
 import { exportTripToExcel } from '../lib/export';
@@ -43,12 +43,15 @@ export default function TripDetail() {
       setExpenses(tripExpenses);
 
       // Collect distinct currencies
+      const targetCurr = foundTrip.viewCurrency || baseCurrency;
       const defaultCurr = foundTrip.defaultCurrency || foundTrip.summaryCurrency || 'HKD';
-      const currencies = Array.from(new Set([defaultCurr, baseCurrency, ...tripExpenses.map((e) => e.currency)]));
+      const currencies = Array.from(
+        new Set([targetCurr, baseCurrency, defaultCurr, ...tripExpenses.map((e) => e.currency)])
+      );
       
       setIsFetchingRates(true);
       try {
-        const info = await resolveRatesForTrip(baseCurrency, currencies);
+        const info = await resolveRatesForTrip(targetCurr, currencies);
         setRatesInfo(info);
       } catch (err) {
         console.warn('Failed to resolve rates:', err);
@@ -68,15 +71,40 @@ export default function TripDetail() {
 
   const handleRefreshRates = async () => {
     if (!trip) return;
+    const targetCurr = trip.viewCurrency || baseCurrency;
     const defaultCurr = trip.defaultCurrency || trip.summaryCurrency || 'HKD';
-    const currencies = Array.from(new Set([defaultCurr, baseCurrency, ...expenses.map((e) => e.currency)]));
+    const currencies = Array.from(
+      new Set([targetCurr, baseCurrency, defaultCurr, ...expenses.map((e) => e.currency)])
+    );
     
     setIsFetchingRates(true);
     try {
-      const info = await resolveRatesForTrip(baseCurrency, currencies);
+      const info = await resolveRatesForTrip(targetCurr, currencies);
       setRatesInfo(info);
     } catch (err) {
       console.warn('Failed to refresh rates:', err);
+    } finally {
+      setIsFetchingRates(false);
+    }
+  };
+
+  const handleDisplayCurrencyChange = async (newCurr: string) => {
+    if (!trip) return;
+    const updatedTrip: Trip = { ...trip, viewCurrency: newCurr };
+    updateTrip(updatedTrip);
+    setTrip(updatedTrip);
+
+    const defaultCurr = updatedTrip.defaultCurrency || updatedTrip.summaryCurrency || 'HKD';
+    const currencies = Array.from(
+      new Set([newCurr, baseCurrency, defaultCurr, ...expenses.map((e) => e.currency)])
+    );
+
+    setIsFetchingRates(true);
+    try {
+      const info = await resolveRatesForTrip(newCurr, currencies);
+      setRatesInfo(info);
+    } catch (err) {
+      console.warn('Failed to fetch rates for new view currency:', err);
     } finally {
       setIsFetchingRates(false);
     }
@@ -154,11 +182,31 @@ export default function TripDetail() {
     ratesMap[curr] = info.rate;
   });
 
+  const viewCurrency = trip.viewCurrency || baseCurrency;
+  const allowedBase = ['HKD', 'USD', 'EUR'];
   const defaultCurrency = trip.defaultCurrency || trip.summaryCurrency || 'HKD';
-  const spentSummary = calculateTripSpent(trip, expenses, ratesMap, baseCurrency);
+  const usedCurrencies = expenses.map((e) => e.currency);
+  const viewCurrencyOptions = Array.from(
+    new Set([...allowedBase, defaultCurrency, ...usedCurrencies, viewCurrency])
+  ).filter(Boolean);
+
+  const spentSummary = calculateTripSpent(trip, expenses, ratesMap, viewCurrency);
   const hasBudget = trip.budget !== null && trip.budget !== undefined;
-  const remaining = hasBudget ? trip.budget! - spentSummary.baseSpent : null;
-  const isOverBudget = hasBudget && remaining! < 0;
+
+  let convertedBudget: number | null = null;
+  if (hasBudget) {
+    if (viewCurrency === baseCurrency) {
+      convertedBudget = trip.budget!;
+    } else {
+      const rateFromBase = ratesMap[baseCurrency];
+      if (typeof rateFromBase === 'number' && !isNaN(rateFromBase)) {
+        convertedBudget = trip.budget! * rateFromBase;
+      }
+    }
+  }
+
+  const remaining = convertedBudget !== null ? convertedBudget - spentSummary.baseSpent : null;
+  const isOverBudget = remaining !== null && remaining < 0;
 
   // Filter expenses
   const filteredExpenses = expenses.filter((e) => {
@@ -170,9 +218,9 @@ export default function TripDetail() {
     return matchesCategory && matchesQuery;
   });
 
-  // Helper function to calculate converted amount for a single expense
+  // Helper function to calculate converted amount for a single expense in viewCurrency
   const getExpenseConvertedAmount = (exp: Expense): number | null => {
-    if (exp.currency === baseCurrency) return exp.amount;
+    if (exp.currency === viewCurrency) return exp.amount;
     const rate = ratesMap[exp.currency];
     if (typeof rate === 'number' && !isNaN(rate)) {
       return exp.amount * rate;
@@ -263,28 +311,46 @@ export default function TripDetail() {
         </p>
       </div>
 
-      {/* 2. Dual Currency Summary Panel */}
+      {/* 2. Summary Panel with Single Currency Display & Currency Picker */}
       <div className="bg-white border border-gray-200 rounded-2xl p-4 shadow-xs mb-5 space-y-3">
-        {/* Spent Row with Dual Currency Display */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-gray-100 pb-2.5 gap-1">
-          <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Spent:</span>
-          <div className="text-right">
-            <span className="font-bold text-gray-900 text-base">
-              {formatCurrency(spentSummary.rawDefaultSpent, defaultCurrency)}
+        {/* Spent Row with Single Number & Display Currency Dropdown */}
+        <div className="flex items-center justify-between border-b border-gray-100 pb-2.5 gap-2 flex-wrap">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Spent:</span>
+            <span className="font-extrabold text-gray-900 text-lg">
+              {formatCurrency(spentSummary.baseSpent, viewCurrency)}
             </span>
-            <span className="font-bold text-blue-600 text-base ml-1.5">
-              / {formatCurrency(spentSummary.baseSpent, baseCurrency)}
-            </span>
+          </div>
+
+          {/* Display Currency Dropdown */}
+          <div className="flex items-center gap-1.5">
+            <label htmlFor="display-currency-select" className="text-[11px] font-semibold text-gray-500">
+              Display:
+            </label>
+            <select
+              id="display-currency-select"
+              value={viewCurrency}
+              onChange={(e) => handleDisplayCurrencyChange(e.target.value)}
+              className="min-h-[34px] px-2.5 py-1 text-xs font-bold bg-gray-100 hover:bg-gray-200 border border-gray-200 rounded-xl text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-300 cursor-pointer shadow-2xs"
+            >
+              {viewCurrencyOptions.map((curr) => (
+                <option key={curr} value={curr}>
+                  {curr}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
 
-        {/* Budget & Remaining (Base Currency only) */}
+        {/* Budget & Remaining (Converted to viewCurrency) */}
         {hasBudget && (
           <div className="grid grid-cols-2 gap-2 text-center pt-1 text-xs">
             <div className="bg-gray-50 p-2 rounded-xl border border-gray-100">
               <div className="text-gray-400 font-medium text-[10px] uppercase tracking-wider">Budget</div>
               <div className="font-bold text-gray-900 text-sm mt-0.5 truncate">
-                {formatCurrency(trip.budget!, baseCurrency)}
+                {convertedBudget !== null
+                  ? formatCurrency(convertedBudget, viewCurrency)
+                  : `${formatCurrency(trip.budget!, baseCurrency)} (N/A)`}
               </div>
             </div>
             <div className="bg-gray-50 p-2 rounded-xl border border-gray-100">
@@ -294,7 +360,7 @@ export default function TripDetail() {
                   isOverBudget ? 'text-red-600' : 'text-emerald-600'
                 }`}
               >
-                {formatCurrency(remaining!, baseCurrency)}
+                {remaining !== null ? formatCurrency(remaining, viewCurrency) : 'N/A'}
               </div>
             </div>
           </div>
@@ -304,7 +370,7 @@ export default function TripDetail() {
         <div className="space-y-1 pt-0.5">
           {spentSummary.otherCurrenciesCount > 0 && (
             <p className="text-[11px] text-gray-500 font-medium">
-              + {spentSummary.otherCurrenciesCount} expense{spentSummary.otherCurrenciesCount > 1 ? 's' : ''} in other currencies, included in {baseCurrency} total
+              + {spentSummary.otherCurrenciesCount} expense{spentSummary.otherCurrenciesCount > 1 ? 's' : ''} in other currencies, included in {viewCurrency} total
             </p>
           )}
           {spentSummary.missingRatesCount > 0 && (
@@ -349,7 +415,7 @@ export default function TripDetail() {
       <CategoryPieChart
         expenses={expenses}
         ratesMap={ratesMap}
-        baseCurrency={baseCurrency}
+        baseCurrency={viewCurrency}
       />
 
       {/* 4. Filter & Sort Bar */}
@@ -440,8 +506,8 @@ export default function TripDetail() {
           <div className="space-y-2.5">
             {sortedExpenses.map((exp) => {
               const rateDetails = ratesInfo[exp.currency];
-              const isBase = exp.currency === baseCurrency;
-              const converted = getExpenseConvertedAmount(exp);
+              const isViewCurr = exp.currency === viewCurrency;
+              const convertedInView = getExpenseConvertedAmount(exp);
               const splitList = exp.splitAmong && exp.splitAmong.length > 0 ? exp.splitAmong : ['Me'];
               const perPersonSplit = personSplitAmount(exp.amount, splitList.length);
 
@@ -485,12 +551,12 @@ export default function TripDetail() {
                           {formatCurrency(exp.amount, exp.currency)}
                         </div>
 
-                        {/* Line 2: Converted Amount in Base Currency (if different) */}
-                        {!isBase && (
+                        {/* Line 2: Converted Amount in View Currency (if different) */}
+                        {!isViewCurr && (
                           <div className="text-xs font-semibold text-gray-500 mt-0.5">
-                            {converted !== null ? (
+                            {convertedInView !== null ? (
                               <span>
-                                / {formatCurrency(converted, baseCurrency)}
+                                / {formatCurrency(convertedInView, viewCurrency)}
                                 {rateDetails?.status === 'cached' && rateDetails.fetchedAt && (
                                   <span className="text-[10px] text-amber-600 font-normal ml-1">
                                     (as of {rateDetails.fetchedAt})

@@ -14,6 +14,7 @@ export type Trip = {
   defaultCurrency: string; // ISO currency code for defaulting new expenses, e.g. "JPY"
   participants: string[];  // list of people on the trip, defaults to ["Me"]
   created: string;       // ISO datetime
+  viewCurrency?: string;  // optional viewing preference currency for trip detail
   // Legacy field support for migration
   summaryCurrency?: string;
 };
